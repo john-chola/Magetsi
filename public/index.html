@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16130f">
+<meta name="description" content="Load-shedding schedule, reminders and real outage logs for Zambian towns.">
+<title>Magetsi: load-shedding schedule</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #16130f; --panel: #211d17; --panel-2: #2b261e; --line: #3a3328;
+    --ink: #f4ede0; --muted: #b3a892; --faint: #8a806d;
+    --amber: #ffb627; --amber-ink: #241a00; --off: #ff6b4a; --on: #5ad19a;
+    --radius: 16px; --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); }
+  body { min-height: 100vh; padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .wrap { max-width: 520px; margin: 0 auto; padding: 0 16px; }
+
+  header.top { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  header.top .wrap { display: flex; align-items: center; justify-content: space-between; height: 56px; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 800; letter-spacing: .2px; font-size: 18px; }
+  .brand svg { width: 22px; height: 22px; }
+  .area-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; font-size: 14px; max-width: 60%; }
+  .area-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .demo-pill { font-size: 11px; font-weight: 700; color: var(--amber-ink); background: var(--amber); border-radius: 6px; padding: 2px 6px; margin-left: 2px; }
+
+  main section { display: none; padding-top: 16px; }
+  main section.active { display: block; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); margin: 24px 0 10px; font-weight: 700; }
+
+  /* status card */
+  .status { border-radius: 22px; padding: 22px 20px; background: var(--panel); border: 1px solid var(--line); position: relative; overflow: hidden; }
+  .status.off { background: radial-gradient(120% 120% at 100% 0%, #3a1d14 0%, var(--panel) 60%); border-color: #5a2a1c; }
+  .status.on { background: radial-gradient(120% 120% at 100% 0%, #3b2f0c 0%, var(--panel) 60%); border-color: #5a4612; }
+  .status .label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .status.on .dot { background: var(--on); box-shadow: 0 0 0 4px #5ad19a22; }
+  .status.off .dot { background: var(--off); box-shadow: 0 0 0 4px #ff6b4a22; }
+  .status .big { font-size: 44px; font-weight: 850; letter-spacing: -1px; margin: 8px 0 2px; line-height: 1; }
+  .status.on .big { color: var(--amber); }
+  .status.off .big { color: var(--off); }
+  .status .sub { color: var(--ink); font-size: 16px; margin-top: 10px; }
+  .countdown { font-family: var(--mono); font-size: 30px; font-weight: 700; margin-top: 4px; letter-spacing: .5px; }
+  .status .note { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); font-size: 14px; color: var(--muted); }
+  .status .note b { color: var(--ink); }
+  .warn { color: var(--off) !important; }
+
+  /* report buttons */
+  .report { display: grid; gap: 10px; margin-top: 14px; }
+  .btn { border: 0; border-radius: 14px; padding: 16px; font-size: 17px; font-weight: 750; display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 56px; }
+  .btn.primary { background: var(--amber); color: var(--amber-ink); }
+  .btn.danger { background: var(--off); color: #2a0b03; }
+  .btn.ghost { background: transparent; border: 1px solid var(--line); color: var(--ink); font-weight: 600; font-size: 15px; min-height: 48px; padding: 12px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .hint { font-size: 13px; color: var(--faint); text-align: center; margin: 4px 0 0; }
+
+  /* next list */
+  .next { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+  .next-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); font-size: 15px; }
+  .next-row:last-child { border-bottom: 0; }
+  .next-row .when { color: var(--muted); font-size: 13px; }
+  .tm { font-family: var(--mono); font-weight: 700; }
+
+  /* schedule */
+  .day { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; }
+  .day.today { border-color: #6b5316; }
+  .day-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+  .day-head b { font-size: 15px; }
+  .day-head span { font-size: 13px; color: var(--muted); }
+  .bar { position: relative; height: 22px; border-radius: 6px; background: #3b2f0c; overflow: hidden; }
+  .bar .blk { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(135deg, #3a1d14 0 6px, #4a2418 6px 12px); border-left: 2px solid var(--off); border-right: 2px solid var(--off); }
+  .bar .now { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); }
+  .ticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--faint); margin-top: 4px; font-family: var(--mono); }
+  .slots { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-family: var(--mono); font-size: 13px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin: 0 0 12px; }
+  .legend i { display: inline-block; width: 14px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+
+  /* stats */
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+  .tile .v { font-size: 30px; font-weight: 800; letter-spacing: -.5px; }
+  .tile .v small { font-size: 15px; font-weight: 600; color: var(--muted); margin-left: 2px; }
+  .tile .k { font-size: 13px; color: var(--muted); margin-top: 2px; line-height: 1.3; }
+  .chart { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+  .crow { display: grid; grid-template-columns: 58px 1fr 40px; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; }
+  .crow .d { color: var(--muted); white-space: nowrap; }
+  .crow .n { font-family: var(--mono); text-align: right; color: var(--muted); }
+  .cbars { display: grid; gap: 3px; }
+  .cbar { height: 9px; border-radius: 3px; min-width: 2px; }
+  .cbar.s { background: #6b6250; }
+  .cbar.a { background: var(--off); }
+  .empty { background: var(--panel); border: 1px dashed var(--line); border-radius: var(--radius); padding: 20px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+  .fine { font-size: 12px; color: var(--faint); line-height: 1.5; margin-top: 10px; }
+
+  /* settings */
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .row .t { font-size: 15px; }
+  .row .d { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .seg { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+  .seg button { background: none; border: 0; padding: 6px 10px; border-radius: 7px; font-size: 14px; color: var(--muted); }
+  .seg button.on { background: var(--amber); color: var(--amber-ink); font-weight: 700; }
+  .switch { position: relative; width: 48px; height: 28px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch span { position: absolute; inset: 0; background: #4a4234; border-radius: 999px; transition: .15s; }
+  .switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--ink); transition: .15s; }
+  .switch input:checked + span { background: var(--amber); }
+  .switch input:checked + span::after { transform: translateX(20px); background: var(--amber-ink); }
+  .switch input:focus-visible + span { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+  /* tab bar */
+  nav.tabs { position: fixed; bottom: 0; left: 0; right: 0; z-index: 6; background: #1b1813; border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+  nav.tabs .wrap { display: grid; grid-template-columns: repeat(4, 1fr); }
+  nav.tabs button { background: none; border: 0; padding: 10px 0 12px; display: grid; justify-items: center; gap: 3px; font-size: 12px; color: var(--faint); }
+  nav.tabs button svg { width: 22px; height: 22px; }
+  nav.tabs button[aria-selected="true"] { color: var(--amber); }
+
+  /* dialogs */
+  dialog { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 20px; padding: 0; width: min(480px, calc(100vw - 24px)); max-height: 85vh; }
+  dialog::backdrop { background: #000a; }
+  .dlg-h { display: flex; justify-content: space-between; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--line); font-weight: 750; }
+  .dlg-b { padding: 14px 18px 18px; }
+  .x { background: none; border: 0; font-size: 22px; color: var(--muted); line-height: 1; }
+  input[type=search], input[type=datetime-local] { width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font: inherit; font-size: 16px; color-scheme: dark; }
+  .list { max-height: 50vh; overflow: auto; margin-top: 10px; }
+  .list button { display: flex; width: 100%; justify-content: space-between; background: none; border: 0; border-bottom: 1px solid var(--line); padding: 13px 4px; font-size: 16px; text-align: left; }
+  .list button span { color: var(--muted); font-size: 13px; }
+  .list button[aria-current="true"] { color: var(--amber); }
+  label.f { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 6px; }
+  .err { color: var(--off); font-size: 14px; min-height: 20px; margin-top: 10px; }
+
+  /* saved areas */
+  .areas-row { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 14px; scrollbar-width: none; }
+  .areas-row button { flex: none; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font-size: 14px; color: var(--muted); }
+  .areas-row button.on { background: var(--amber); border-color: var(--amber); color: var(--amber-ink); font-weight: 700; }
+  .areas-row button[data-add] { border-style: dashed; }
+  .lh { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--faint); font-weight: 700; padding: 14px 4px 4px; }
+  .saved-item { display: flex; align-items: stretch; }
+  .saved-item button[data-id] { flex: 1; }
+  .list .rm { width: 48px; flex: none; justify-content: center; color: var(--muted); font-size: 22px; padding: 0; }
+
+  /* forms in cards */
+  .btn.sm { min-height: 40px; padding: 8px 14px; font-size: 14px; flex: none; }
+  .pad { padding: 4px 16px 16px; }
+  .inp { width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font: inherit; font-size: 16px; color-scheme: dark; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  label.check { display: flex; gap: 10px; align-items: center; font-size: 15px; margin: 14px 0 0; }
+  label.check input { width: 20px; height: 20px; accent-color: var(--amber); }
+  .link-row { display: block; margin-top: 14px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); color: var(--amber); text-decoration: none; font-weight: 600; font-size: 15px; }
+
+  .toast { position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%) translateY(20px); background: var(--ink); color: var(--bg); padding: 11px 16px; border-radius: 12px; font-size: 14px; font-weight: 600; opacity: 0; pointer-events: none; transition: .2s; z-index: 20; max-width: calc(100vw - 32px); }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .welcome { text-align: center; padding: 40px 8px; }
+  .welcome h1 { font-size: 28px; margin: 12px 0 8px; letter-spacing: -.5px; }
+  .welcome p { color: var(--muted); line-height: 1.5; margin: 0 0 22px; }
+  :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" fill="#ffb627"/></svg>
+      Magetsi <span id="demoPill" class="demo-pill" hidden>DEMO</span>
+    </div>
+    <button class="area-btn" id="areaBtn" aria-haspopup="dialog">
+      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z" fill="currentColor"/></svg>
+      <span id="areaName">Choose area</span>
+    </button>
+  </div>
+</header>
+
+<main class="wrap">
+  <section id="tab-home" class="active" aria-label="Now">
+    <div id="home"></div>
+  </section>
+  <section id="tab-schedule" aria-label="Schedule">
+    <div id="schedule"></div>
+  </section>
+  <section id="tab-stats" aria-label="Reliability">
+    <div id="stats"></div>
+  </section>
+  <section id="tab-alerts" aria-label="Alerts">
+    <div id="alerts"></div>
+  </section>
+</main>
+
+<nav class="tabs" role="tablist">
+  <div class="wrap">
+    <button role="tab" data-tab="home" aria-selected="true">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Now</button>
+    <button role="tab" data-tab="schedule" aria-selected="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Schedule</button>
+    <button role="tab" data-tab="stats" aria-selected="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M12 20V5M19 20v-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Reliability</button>
+    <button role="tab" data-tab="alerts" aria-selected="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16zM10 20.5a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Alerts</button>
+  </div>
+</nav>
+
+<dialog id="areaDlg" aria-labelledby="areaDlgTitle">
+  <div class="dlg-h"><span id="areaDlgTitle">Your areas</span><button class="x" data-close aria-label="Close">×</button></div>
+  <div class="dlg-b">
+    <input type="search" id="areaSearch" placeholder="Search e.g. Chilenje, Kitwe, Dambwa" autocomplete="off" aria-label="Search areas or towns">
+    <div class="list" id="areaList"></div>
+    <p class="fine">Follow up to 5 areas, e.g. home, work and family. Alerts cover all of them. Area-to-group mapping is illustrative in this prototype; replace it with ZESCO's published list.</p>
+  </div>
+</dialog>
+
+<dialog id="logDlg" aria-labelledby="logDlgTitle">
+  <div class="dlg-h"><span id="logDlgTitle">Log a past outage</span><button class="x" data-close aria-label="Close">×</button></div>
+  <form class="dlg-b" id="logForm">
+    <label class="f" for="logOff">Power went off (Zambia time)</label>
+    <input type="datetime-local" id="logOff" required>
+    <label class="f" for="logOn">Power came back</label>
+    <input type="datetime-local" id="logOn" required>
+    <div class="err" id="logErr" role="alert"></div>
+    <button class="btn primary" style="width:100%;margin-top:6px" type="submit">Save outage</button>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="core.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

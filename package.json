@@ -1,0 +1,14 @@
+{
+  "name": "magetsi",
+  "version": "0.1.0",
+  "description": "Load-shedding schedule, reminders and crowdsourced outage logs for Lusaka",
+  "main": "server.js",
+  "private": true,
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test",
+    "build:demo": "node build-demo.js"
+  },
+  "license": "MIT"
+}

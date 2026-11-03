@@ -1,0 +1,21 @@
+# Local database (holds VAPID private keys, phone numbers and reports)
+*.db
+*.db-shm
+*.db-wal
+
+# Build output
+dist/
+
+# Dependencies (none today, in case any are added)
+node_modules/
+
+# Secrets and local settings
+.env
+.env.*
+
+# Logs and OS/editor clutter
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

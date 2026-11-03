@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#16130f">
+<meta name="description" content="How well each area's load-shedding schedule is kept, from household outage reports.">
+<title>Magetsi: schedule adherence by area</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root { --bg: #16130f; --panel: #211d17; --panel-2: #2b261e; --line: #3a3328; --ink: #f4ede0; --muted: #b3a892; --faint: #8a806d; --amber: #ffb627; --amber-ink: #241a00; --off: #ff6b4a; --on: #5ad19a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+  a { color: var(--amber); }
+  h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: -.3px; }
+  p { color: var(--muted); line-height: 1.5; margin: 0 0 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 18px 0; }
+  .seg { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+  .seg button { background: none; border: 0; padding: 7px 12px; border-radius: 7px; font: inherit; font-size: 14px; color: var(--muted); cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--amber); color: var(--amber-ink); font-weight: 700; }
+  select, .dl { background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font: inherit; font-size: 14px; color-scheme: dark; }
+  .dl { text-decoration: none; color: var(--amber); font-weight: 600; margin-left: auto; }
+  .towns { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .town { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+  .town b { font-size: 15px; } .town .v { font-size: 26px; font-weight: 800; margin-top: 4px; } .town .k { font-size: 12px; color: var(--muted); }
+  .tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; min-width: 720px; }
+  th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  th { position: sticky; top: 0; background: var(--panel-2); }
+  th button { all: unset; cursor: pointer; color: var(--muted); font-weight: 600; font-size: 13px; }
+  th button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  th[aria-sort] button { color: var(--ink); }
+  td.n { font-family: ui-monospace, Menlo, Consolas, monospace; text-align: right; }
+  th.n { text-align: right; }
+  .pct { display: inline-flex; align-items: center; gap: 8px; }
+  .pct i { display: inline-block; height: 8px; border-radius: 4px; background: var(--line); width: 70px; position: relative; overflow: hidden; }
+  .pct i span { position: absolute; inset: 0 auto 0 0; border-radius: 4px; }
+  .thin { color: var(--faint); }
+  .fine { font-size: 12px; color: var(--faint); margin-top: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Is the load-shedding schedule kept?</h1>
+  <p>For each area, households tap <b>Power went off</b> and <b>Power is back</b> in Magetsi. These figures compare what they logged with the published schedule. Each figure is the median reporting household. <a href="./">Open the app</a></p>
+
+  <div class="bar">
+    <div class="seg" role="group" aria-label="Period">
+      <button data-days="7" aria-pressed="true">Last 7 days</button>
+      <button data-days="30" aria-pressed="false">Last 30 days</button>
+    </div>
+    <label for="town" class="thin" style="font-size:14px">Town</label>
+    <select id="town"><option value="">All towns</option></select>
+    <a class="dl" id="dl" href="api/dashboard.csv?days=7" download>Download CSV</a>
+  </div>
+
+  <div class="towns" id="towns"></div>
+  <div class="tablewrap"><table id="tbl" aria-describedby="note"><thead></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
+  <p class="fine" id="note"></p>
+</div>
+<script src="core.js"></script>
+<script>
+(function () {
+  const C = window.MagetsiCore;
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const st = { days: 7, town: '', sort: 'onSchedulePct', dir: 1, data: null };
+  const cols = [
+    { k: 'name', label: 'Area' }, { k: 'town', label: 'Town' }, { k: 'group_code', label: 'Group' },
+    { k: 'onSchedulePct', label: 'On schedule', n: 1 }, { k: 'extraHoursPerDay', label: 'Unscheduled h/day', n: 1 },
+    { k: 'lateRestoreMinPerDay', label: 'Late restore min/day', n: 1 }, { k: 'actualHoursPerDay', label: 'Off h/day', n: 1 },
+    { k: 'scheduledHoursPerDay', label: 'Scheduled h/day', n: 1 }, { k: 'households', label: 'Households', n: 1 },
+  ];
+  const color = (p) => (p >= 85 ? 'var(--on)' : p >= 70 ? 'var(--amber)' : 'var(--off)');
+
+  async function load() {
+    document.getElementById('dl').href = `api/dashboard.csv?days=${st.days}`;
+    try {
+      const r = await fetch(`api/dashboard?days=${st.days}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      st.data = await r.json();
+    } catch (e) {
+      document.querySelector('#tbl tbody').innerHTML = `<tr><td>Could not load the data (${esc(e.message)}). The dashboard needs the Magetsi server.</td></tr>`;
+      return;
+    }
+    const sel = document.getElementById('town');
+    if (sel.options.length === 1) for (const t of st.data.towns) sel.add(new Option(t, t));
+    draw();
+  }
+
+  function draw() {
+    const d = st.data;
+    const rows = d.rows.filter((r) => !st.town || r.town === st.town);
+    // town summaries: median of areas with enough reports
+    const towns = (st.town ? [st.town] : d.towns).map((t) => {
+      const ok = d.rows.filter((r) => r.town === t && r.enough);
+      return { t, n: d.rows.filter((r) => r.town === t).length, ok: ok.length, pct: ok.length ? Math.round(C.median(ok.map((r) => r.onSchedulePct))) : null };
+    });
+    document.getElementById('towns').innerHTML = towns.map((x) => `<div class="town"><b>${esc(x.t)}</b>
+      <div class="v" style="color:${x.pct == null ? 'var(--faint)' : color(x.pct)}">${x.pct == null ? '–' : x.pct + '%'}</div>
+      <div class="k">typical area on schedule · ${x.ok} of ${x.n} areas with enough reports</div></div>`).join('');
+
+    // enough-data rows first, then sorted; nulls last
+    const k = st.sort;
+    rows.sort((a, b) => (b.enough - a.enough) || cmp(a[k], b[k]) * st.dir || a.name.localeCompare(b.name));
+    document.querySelector('#tbl thead').innerHTML = '<tr>' + cols.map((c) =>
+      `<th class="${c.n ? 'n' : ''}" ${c.k === k ? `aria-sort="${st.dir > 0 ? 'ascending' : 'descending'}"` : ''}><button data-k="${c.k}">${c.label}${c.k === k ? (st.dir > 0 ? ' ▲' : ' ▼') : ''}</button></th>`).join('') + '</tr>';
+    document.querySelector('#tbl tbody').innerHTML = rows.map((r) => {
+      const v = (x, suffix = '') => (r.enough && x != null ? x + suffix : '<span class="thin">–</span>');
+      const pct = r.enough ? `<span class="pct"><i><span style="width:${r.onSchedulePct}%;background:${color(r.onSchedulePct)}"></span></i>${r.onSchedulePct}%</span>` : '<span class="thin">not enough reports</span>';
+      return `<tr><td>${esc(r.name)}</td><td>${esc(r.town)}</td><td>${esc(r.group_code)}</td><td class="n">${pct}</td>
+        <td class="n">${v(r.extraHoursPerDay)}</td><td class="n">${v(r.lateRestoreMinPerDay)}</td><td class="n">${v(r.actualHoursPerDay)}</td>
+        <td class="n">${r.scheduledHoursPerDay}</td><td class="n">${r.households}</td></tr>`;
+    }).join('') || '<tr><td>No areas.</td></tr>';
+    document.querySelectorAll('#tbl th button').forEach((b) => b.onclick = () => {
+      if (st.sort === b.dataset.k) st.dir = -st.dir; else { st.sort = b.dataset.k; st.dir = 1; }
+      draw();
+    });
+    document.getElementById('note').textContent = `${d.from} to ${d.to}, Zambia time. Areas with fewer than ${d.minHouseholds} reporting households show no figures. ` +
+      'Area-to-group mapping in this prototype is illustrative.';
+  }
+  const cmp = (a, b) => (a == null ? 1 : b == null ? -1 : typeof a === 'string' ? a.localeCompare(b) : a - b);
+
+  document.querySelectorAll('[data-days]').forEach((b) => b.onclick = () => {
+    st.days = Number(b.dataset.days);
+    document.querySelectorAll('[data-days]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    load();
+  });
+  document.getElementById('town').onchange = (e) => { st.town = e.target.value; draw(); };
+  load();
+})();
+</script>
+</body>
+</html>

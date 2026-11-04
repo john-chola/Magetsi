@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Magetsi admin: sign in</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  body { margin: 0; background: #16130f; color: #f4ede0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 380px; margin: 0 auto; padding: 64px 16px; }
+  h1 { font-size: 22px; margin: 0 0 6px; } p { color: #b3a892; line-height: 1.5; font-size: 14px; }
+  label { display: block; font-size: 13px; color: #b3a892; margin: 18px 0 6px; }
+  input { width: 100%; box-sizing: border-box; background: #211d17; color: #f4ede0; border: 1px solid #3a3328; border-radius: 10px; padding: 12px; font-size: 16px; }
+  button { width: 100%; margin-top: 14px; background: #ffb627; color: #241a00; border: 0; border-radius: 10px; padding: 12px 18px; font-weight: 700; font-size: 15px; cursor: pointer; }
+  .bad { color: #ff6b4a; font-size: 14px; min-height: 20px; margin-top: 12px; }
+  a { color: #ffb627; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <h1>Magetsi admin</h1>
+  <p>Sign in with the admin token. It is set with <code>ADMIN_TOKEN</code>, or printed in the server console when the server starts.</p>
+  <form method="post" action="/admin/login">
+    <label for="token">Admin token</label>
+    <input id="token" name="token" type="password" autocomplete="current-password" required autofocus>
+    <div class="bad" role="alert"><!--ERROR--></div>
+    <button type="submit">Sign in</button>
+  </form>
+  <p><a href="/">Back to the app</a></p>
+</main>
+</body>
+</html>

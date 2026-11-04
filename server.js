@@ -75,6 +75,7 @@ db.exec(`
     phone TEXT NOT NULL, message TEXT NOT NULL, kind TEXT NOT NULL,
     status TEXT, provider_id TEXT, created_at INTEGER NOT NULL);
   CREATE INDEX IF NOT EXISTS sms_outbox_time ON sms_outbox(created_at);
+  CREATE TABLE IF NOT EXISTS admin_sessions (id_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL);
 `);
 // databases from before towns existed
 if (!db.prepare('PRAGMA table_info(areas)').all().some((c) => c.name === 'town')) {
@@ -164,6 +165,11 @@ const q = {
   unclaim: db.prepare('DELETE FROM sent_alerts WHERE channel = ? AND target = ? AND tag = ?'),
   pruneSent: db.prepare('DELETE FROM sent_alerts WHERE sent_at < ?'),
 
+  sessionAdd: db.prepare('INSERT INTO admin_sessions (id_hash, expires) VALUES (?, ?)'),
+  sessionGet: db.prepare('SELECT 1 FROM admin_sessions WHERE id_hash = ? AND expires > ?'),
+  sessionDelete: db.prepare('DELETE FROM admin_sessions WHERE id_hash = ?'),
+  sessionPrune: db.prepare('DELETE FROM admin_sessions WHERE expires <= ?'),
+
   outboxAdd: db.prepare('INSERT INTO sms_outbox (phone, message, kind, status, provider_id, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
   outboxSince: db.prepare("SELECT COUNT(*) n FROM sms_outbox WHERE created_at >= ? AND status <> 'over-limit'"),
   outboxRecent: db.prepare('SELECT phone, message, kind, status, created_at FROM sms_outbox ORDER BY id DESC LIMIT 30'),
@@ -248,9 +254,73 @@ const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const sameHash = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const maskPhone = (p) => p.slice(0, 7) + '***' + p.slice(-3);
 
+// ---------- admin sign-in ----------
+// The admin page lives outside public/ and is only sent to a signed-in session.
+// Sign in with ADMIN_TOKEN -> random session id in an HttpOnly, SameSite=Strict cookie (only its hash is stored).
+// Scripts can still call /api/admin/* with an X-Admin-Token header.
+const ADMIN_DIR = path.join(__dirname, 'admin');
+const SESSION_COOKIE = 'mg_admin';
+const SESSION_MS = 12 * core.HOUR;
+const tokenOk = (t) => typeof t === 'string' && t.length > 0 && sameHash(sha(t), sha(ADMIN_TOKEN));
+
+function cookies(req) {
+  const out = {};
+  for (const part of String(req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
+}
+const isHttps = (req) => !!req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https';
+const sessionCookie = (req, value, maxAgeS) =>
+  `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeS}${isHttps(req) ? '; Secure' : ''}`;
+
+function isAdmin(req) {
+  if (tokenOk(req.headers['x-admin-token'])) return true;
+  const sid = cookies(req)[SESSION_COOKIE];
+  return !!(sid && q.sessionGet.get(sha(sid), Date.now()));
+}
+
+const ADMIN_HEADERS = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' };
+function adminPage(res, status, file, error = '') {
+  let html = fs.readFileSync(path.join(ADMIN_DIR, file), 'utf8');
+  if (error) html = html.replace('<!--ERROR-->', error);
+  res.writeHead(status, ADMIN_HEADERS);
+  res.end(html);
+}
+const redirect = (res, to, extra = {}) => { res.writeHead(303, { Location: to, 'Cache-Control': 'no-store', ...extra }); res.end(); };
+
+/** /admin, /admin/login, /admin/logout. Returns true if handled. */
+async function adminRoutes(req, res, url) {
+  const p = url.pathname.replace(/\/+$/, '') || '/';
+  if (p === '/admin' && req.method === 'GET') {
+    adminPage(res, 200, isAdmin(req) ? 'admin.html' : 'login.html');
+    return true;
+  }
+  if (p === '/admin/login' && req.method === 'POST') {
+    const ip = req.socket.remoteAddress || '?';
+    if (!allow('login:' + ip, 10, 15 * core.MIN)) { adminPage(res, 429, 'login.html', 'Too many attempts. Wait 15 minutes and try again.'); return true; }
+    const body = await readForm(req);
+    if (!tokenOk(String(body.token || '').trim())) { adminPage(res, 401, 'login.html', 'Wrong admin token.'); return true; }
+    const sid = crypto.randomBytes(32).toString('base64url');
+    const now = Date.now();
+    q.sessionPrune.run(now);
+    q.sessionAdd.run(sha(sid), now + SESSION_MS);
+    redirect(res, '/admin', { 'Set-Cookie': sessionCookie(req, sid, SESSION_MS / 1000) });
+    return true;
+  }
+  if (p === '/admin/logout' && req.method === 'POST') {
+    const sid = cookies(req)[SESSION_COOKIE];
+    if (sid) q.sessionDelete.run(sha(sid));
+    redirect(res, '/admin', { 'Set-Cookie': sessionCookie(req, '', 0) });
+    return true;
+  }
+  if (p.startsWith('/admin/')) { fail(res, 404, 'Not found'); return true; }
+  return false;
+}
+
 function serveStatic(req, res, pathname) {
   let file = pathname === '/' ? '/index.html' : pathname;
-  if (file === '/admin') file = '/admin.html';
   if (file === '/dashboard') file = '/dashboard.html';
   const full = path.normalize(path.join(PUBLIC, file));
   if (!full.startsWith(PUBLIC)) return fail(res, 403, 'Forbidden');
@@ -521,7 +591,7 @@ async function api(req, res, url) {
   }
 
   if (m === 'POST' && p === '/api/sms/inbound') {
-    if (url.searchParams.get('key') !== SMS_INBOUND_KEY && req.headers['x-admin-token'] !== ADMIN_TOKEN) return fail(res, 401, 'Wrong key');
+    if (url.searchParams.get('key') !== SMS_INBOUND_KEY && !isAdmin(req)) return fail(res, 401, 'Wrong key');
     const body = await readForm(req);
     const phone = core.normalizePhone(body.from);
     if (!phone) return send(res, 200, { ignored: 'Not a Zambian mobile number' });
@@ -571,7 +641,7 @@ async function api(req, res, url) {
   }
 
   // ----- admin -----
-  if (p.startsWith('/api/admin/') && req.headers['x-admin-token'] !== ADMIN_TOKEN) return fail(res, 401, 'Wrong admin token');
+  if (p.startsWith('/api/admin/') && !isAdmin(req)) return fail(res, 401, 'Sign in at /admin first');
 
   if (m === 'POST' && p === '/api/admin/slots') {
     const body = await readJson(req);
@@ -609,7 +679,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
     if (url.pathname.startsWith('/api/')) await api(req, res, url);
-    else serveStatic(req, res, url.pathname);
+    else if (!(await adminRoutes(req, res, url))) serveStatic(req, res, url.pathname);
   } catch (e) {
     console.error(e);
     fail(res, 500, e.message || 'Server error');

@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Magetsi admin: import schedule</title>
-<link rel="icon" href="icon.svg" type="image/svg+xml">
+<meta name="robots" content="noindex">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
 <style>
   body { margin: 0; background: #16130f; color: #f4ede0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
@@ -22,10 +23,9 @@
 </head>
 <body>
 <div class="wrap">
+  <form method="post" action="/admin/logout" style="float:right"><button type="submit" style="margin:0;padding:8px 14px;font-size:13px;background:#2b261e;color:#f4ede0;border:1px solid #3a3328">Sign out</button></form>
   <h1>Import a ZESCO schedule</h1>
-  <p>Paste one outage slot per line as <code>group,date,start,end</code> in Lusaka time. An end time earlier than the start means the slot runs past midnight. <a href="./" style="color:#ffb627">Back to app</a></p>
-  <label for="tok">Admin token (printed in the server console, or set with ADMIN_TOKEN)</label>
-  <input id="tok" type="password" autocomplete="off">
+  <p>Paste one outage slot per line as <code>group,date,start,end</code> in Lusaka time. An end time earlier than the start means the slot runs past midnight. <a href="/" style="color:#ffb627">Back to app</a></p>
   <label for="csv">Schedule CSV</label>
   <textarea id="csv" spellcheck="false">group,date,start,end
 B,2026-11-02,06:00,10:00
@@ -35,41 +35,41 @@ C,2026-11-02,22:00,02:00</textarea>
   <button id="go">Import schedule</button>
   <pre id="out" aria-live="polite">Waiting…</pre>
   <h2 style="font-size:16px;margin-top:28px">Alerts</h2>
-  <p id="ov">Enter the token above, then <button id="ovBtn" style="margin:0;padding:6px 12px;font-size:13px">Refresh</button></p>
+  <p><span id="ov">Loading…</span> <button id="ovBtn" style="margin:0 0 0 6px;padding:6px 12px;font-size:13px">Refresh</button></p>
   <label for="simFrom">Try an incoming SMS (runs the real command handler; replies are sent or logged like any SMS)</label>
   <div style="display:flex;gap:8px"><input id="simFrom" value="0971234567" style="max-width:160px" aria-label="From number"><input id="simText" value="JOIN CHILENJE" aria-label="Message text"></div>
   <button id="simBtn">Send test SMS to Magetsi</button>
   <pre id="simOut" aria-live="polite">Commands: JOIN &lt;area&gt;, TIMES, STOP, HELP</pre>
   <table id="outbox"></table>
   <h2 style="font-size:16px;margin-top:28px">Areas and groups</h2>
-  <p><a href="dashboard" style="color:#ffb627">Public adherence dashboard</a></p>
+  <p><a href="/dashboard" style="color:#ffb627">Public adherence dashboard</a></p>
   <table id="areas"><tr><th>Area</th><th>Town</th><th>Group</th></tr></table>
 </div>
 <script>
   const out = document.getElementById('out');
-  try { document.getElementById('tok').value = sessionStorage.getItem('mg.admin') || ''; } catch {}
+  // Signed in with a session cookie; if it expires, go back to the sign-in page.
+  const expired = (r) => { if (r.status === 401) { location.href = '/admin'; return true; } return false; };
   document.getElementById('go').onclick = async () => {
-    const token = document.getElementById('tok').value.trim();
-    try { sessionStorage.setItem('mg.admin', token); } catch {}
     out.className = ''; out.textContent = 'Importing…';
     try {
-      const r = await fetch('api/admin/slots', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Token': token },
+      const r = await fetch('/api/admin/slots', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ csv: document.getElementById('csv').value, replace: document.getElementById('replace').checked }) });
+      if (expired(r)) return;
       const j = await r.json();
       if (!r.ok) { out.className = 'bad'; out.textContent = (j.error || 'Failed') + (j.errors ? '\n' + j.errors.join('\n') : ''); return; }
       out.className = 'ok'; out.textContent = `Saved ${j.saved} slot(s). Households see the change on their next refresh.`;
     } catch (e) { out.className = 'bad'; out.textContent = 'Server not reachable: ' + e.message; }
   };
-  fetch('api/areas').then((r) => r.json()).then((j) => {
+  fetch('/api/areas').then((r) => r.json()).then((j) => {
     const t = document.getElementById('areas');
     for (const a of j.areas) { const tr = t.insertRow(); tr.insertCell().textContent = a.name; tr.insertCell().textContent = a.town; tr.insertCell().textContent = a.group_code; }
   }).catch(() => {});
 
-  const token = () => document.getElementById('tok').value.trim();
   async function overview() {
     const ov = document.getElementById('ov');
     try {
-      const r = await fetch('api/admin/overview', { headers: { 'X-Admin-Token': token() } });
+      const r = await fetch('/api/admin/overview');
+      if (expired(r)) return;
       const j = await r.json();
       if (!r.ok) { ov.className = 'bad'; ov.textContent = j.error || 'Failed'; return; }
       ov.className = '';
@@ -86,15 +86,16 @@ C,2026-11-02,22:00,02:00</textarea>
   document.getElementById('simBtn').onclick = async () => {
     const out = document.getElementById('simOut');
     try {
-      const r = await fetch('api/sms/inbound', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Admin-Token': token() },
+      const r = await fetch('/api/sms/inbound', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ from: document.getElementById('simFrom').value, text: document.getElementById('simText').value }) });
+      if (expired(r)) return;
       const j = await r.json();
       out.className = r.ok ? 'ok' : 'bad';
       out.textContent = j.reply ? 'Reply: ' + j.reply : (j.error || j.ignored || 'No reply');
       overview();
     } catch (e) { out.className = 'bad'; out.textContent = e.message; }
   };
-  if (token()) overview();
+  overview();
 </script>
 </body>
 </html>

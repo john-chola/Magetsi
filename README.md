@@ -13,7 +13,7 @@ Households see their area's ZESCO load-shedding schedule, get alerts before powe
 ```bash
 npm start            # or: node server.js
 # app: http://localhost:3000   admin: /admin   dashboard: /dashboard
-npm test             # 38 unit + API tests
+npm test             # 43 unit + API tests
 npm run build:demo   # dist/magetsi-demo.html, a single file that runs with no server (no push/SMS)
 ```
 
@@ -26,7 +26,7 @@ npm run build:demo   # dist/magetsi-demo.html, a single file that runs with no s
 
 | Variable | What it does |
 | --- | --- |
-| `ADMIN_TOKEN` | Token for `/admin`. If unset, a random one is printed at start. |
+| `ADMIN_TOKEN` | Password for signing in at `/admin`. If unset, a random one is printed at start (and changes on every restart). |
 | `VAPID_SUBJECT` | `mailto:you@yourdomain` or an `https://` URL. Push services use it to contact you. Set this in production. |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Optional. If unset, keys are generated once and stored in the database. If you change keys, phones re-subscribe the next time they open the app. |
 | `AT_API_KEY`, `AT_USERNAME` | Africa's Talking credentials. With no key, SMS runs in **log mode**: messages are printed and shown on `/admin`, not sent. `AT_USERNAME=sandbox` uses their sandbox. |
@@ -50,9 +50,18 @@ There are two ways to sign up:
 
 To connect Africa's Talking, set the incoming-messages callback to `https://your-host/api/sms/inbound?key=SMS_INBOUND_KEY`. You can try commands without a shortcode in the "Try an incoming SMS" box on `/admin`.
 
+## Admin page
+
+`/admin` shows only a sign-in form until someone enters `ADMIN_TOKEN`. The admin page itself is in `admin/`, outside `public/`, so it can't be fetched directly.
+
+- Signing in sets a session cookie (HttpOnly, SameSite=Strict, and Secure over HTTPS). It lasts 12 hours, or until **Sign out**. The database stores only a hash of the session id.
+- Sign-in allows 10 attempts per IP address per 15 minutes. Behind a tunnel or proxy, every visitor shares the proxy's IP, so a flood of wrong guesses also locks out the real admin for 15 minutes.
+- Scripts can call `/api/admin/*` with an `X-Admin-Token` header instead of a session.
+- Everyone who signs in shares the same token; there are no individual admin accounts. Use a long random `ADMIN_TOKEN` and serve the site over HTTPS.
+
 ## Importing a real schedule
 
-Open `/admin` and paste CSV in Zambia time (CAT, UTC+2):
+Sign in at `/admin` and paste CSV in Zambia time (CAT, UTC+2):
 
 ```
 group,date,start,end
@@ -79,7 +88,8 @@ Browsers allow notifications and push only on `localhost` or HTTPS. To try it on
 | `public/index.html` | Markup and styles |
 | `public/sw.js` | Offline cache, push messages, notification clicks |
 | `public/dashboard.html` | Public adherence dashboard |
-| `public/admin.html` | Schedule CSV import, alert overview, SMS outbox and test box |
+| `admin/admin.html` | Admin page (sent only to signed-in sessions): schedule CSV import, alert overview, SMS outbox and test box |
+| `admin/login.html` | Admin sign-in form |
 | `test/` | `node --test` suites |
 
 ## API
@@ -104,8 +114,9 @@ Browsers allow notifications and push only on `localhost` or HTTPS. To try it on
 | `POST /api/sms/verify` `{device, phone, code}` | Confirm the code; alerts start |
 | `POST /api/sms/stop` `{device, phone}` | Stop (only from the device that signed up) |
 | `POST /api/sms/inbound?key=K` form `from, text` | Africa's Talking incoming-SMS webhook |
-| `POST /api/admin/slots` `{csv, replace}` + `X-Admin-Token` | Import schedule |
-| `GET /api/admin/overview` + `X-Admin-Token` | Subscriber counts and recent SMS |
+| `POST /admin/login` form `token` · `POST /admin/logout` | Sign the admin in or out |
+| `POST /api/admin/slots` `{csv, replace}` (admin session or `X-Admin-Token`) | Import schedule |
+| `GET /api/admin/overview` (admin session or `X-Admin-Token`) | Subscriber counts and recent SMS |
 
 ## Next steps
 

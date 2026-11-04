@@ -13,7 +13,7 @@ Households see their area's ZESCO load-shedding schedule, get alerts before powe
 ```bash
 npm start            # or: node server.js
 # app: http://localhost:3000   admin: /admin   dashboard: /dashboard
-npm test             # 43 unit + API tests
+npm test             # 50 unit + API tests
 npm run build:demo   # dist/magetsi-demo.html, a single file that runs with no server (no push/SMS)
 ```
 
@@ -26,13 +26,15 @@ npm run build:demo   # dist/magetsi-demo.html, a single file that runs with no s
 
 | Variable | What it does |
 | --- | --- |
-| `ADMIN_TOKEN` | Password for signing in at `/admin`. If unset, a random one is printed at start (and changes on every restart). |
+| `ADMIN_TOKEN` | Optional. Setup token for the first admin, and lets scripts call the admin API with an `X-Admin-Token` header. Admins sign in with their own accounts (see Admin page). |
 | `VAPID_SUBJECT` | `mailto:you@yourdomain` or an `https://` URL. Push services use it to contact you. Set this in production. |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Optional. If unset, keys are generated once and stored in the database. If you change keys, phones re-subscribe the next time they open the app. |
 | `AT_API_KEY`, `AT_USERNAME` | Africa's Talking credentials. With no key, SMS runs in **log mode**: messages are printed and shown on `/admin`, not sent. `AT_USERNAME=sandbox` uses their sandbox. |
 | `AT_SENDER_ID` or `AT_SHORTCODE` | Sender for outgoing SMS. `AT_SHORTCODE` is also shown in the app ("text JOIN CHILENJE to …"). |
-| `SMS_INBOUND_KEY` | Secret for the incoming-SMS webhook (defaults to `ADMIN_TOKEN`). |
+| `SMS_INBOUND_KEY` | Secret for the incoming-SMS webhook. Defaults to `ADMIN_TOKEN`, or a random key stored in the database. The full callback URL is shown on `/admin`. |
 | `SMS_DAILY_LIMIT` | Cost guard: maximum SMS per day (default 2000). |
+| `TRUST_PROXY` | Set to `1` when running behind a hosting proxy (Render, Railway, Fly, Nginx, Cloudflare), so admin sign-in limits use each visitor's real IP. Leave unset if the app is reachable directly. |
+| `PORT`, `DB_FILE` | Port to listen on (default 3000) and database location (default `./magetsi.db`). On a host, put `DB_FILE` on a persistent disk. |
 
 ## How alerts work
 
@@ -52,12 +54,32 @@ To connect Africa's Talking, set the incoming-messages callback to `https://your
 
 ## Admin page
 
-`/admin` shows only a sign-in form until someone enters `ADMIN_TOKEN`. The admin page itself is in `admin/`, outside `public/`, so it can't be fetched directly.
+Each admin has their own username and password. `/admin` shows only a sign-in form to anyone who isn't signed in. The admin pages are in `admin/`, outside `public/`, so they can't be fetched directly.
 
-- Signing in sets a session cookie (HttpOnly, SameSite=Strict, and Secure over HTTPS). It lasts 12 hours, or until **Sign out**. The database stores only a hash of the session id.
-- Sign-in allows 10 attempts per IP address per 15 minutes. Behind a tunnel or proxy, every visitor shares the proxy's IP, so a flood of wrong guesses also locks out the real admin for 15 minutes.
-- Scripts can call `/api/admin/*` with an `X-Admin-Token` header instead of a session.
-- Everyone who signs in shares the same token; there are no individual admin accounts. Use a long random `ADMIN_TOKEN` and serve the site over HTTPS.
+**Creating the first admin.** On a fresh install the server prints a setup token:
+```
+[magetsi] No admin account yet. Open /admin and enter this setup token: Xy3…
+```
+Open `/admin`, enter that token (or your `ADMIN_TOKEN`, if set), and choose a username and password. The setup form disappears once an admin exists.
+
+**Adding more admins.** In the **Admins** section of the admin page, enter a username. Magetsi shows a temporary password once; give it to the person privately. At their first sign-in they must choose their own password before they can do anything else. The same section can reset someone's password (also a temporary one) or disable an account. Both sign that person out. Nobody can disable themselves or the last active admin.
+
+**From the command line.** Use this if everyone is locked out, or to create the first admin without the web form:
+```bash
+npm run admin -- list
+npm run admin -- create <username>    # prints a temporary password
+npm run admin -- reset <username>     # new temporary password; also re-enables the account
+npm run admin -- disable <username>
+```
+
+**Security details**
+- Passwords are hashed with scrypt (`lib/admins.js`). They need at least 10 characters and must not contain the username.
+- Signing in sets a session cookie (HttpOnly, SameSite=Strict, and Secure over HTTPS). It lasts 12 hours, or until **Sign out**. The database stores only a hash of the session id. Changing your password signs out your other sessions.
+- After 10 wrong passwords for a username, or from one IP address, sign-in for it pauses for 15 minutes. Successful sign-ins don't count.
+- Admin API requests must be JSON, which blocks cross-site form attacks.
+- **Recent activity** on the admin page lists sign-ins, failed sign-ins, schedule imports and account changes, with who did them.
+- `ADMIN_TOKEN` is optional. If set, scripts can call `/api/admin/*` (except account management) with an `X-Admin-Token` header, and it serves as the setup token.
+- Upgrading from the shared-token version signs everyone out. Create the first admin with the setup token or `npm run admin -- create`.
 
 ## Importing a real schedule
 
@@ -89,7 +111,9 @@ Browsers allow notifications and push only on `localhost` or HTTPS. To try it on
 | `public/sw.js` | Offline cache, push messages, notification clicks |
 | `public/dashboard.html` | Public adherence dashboard |
 | `admin/admin.html` | Admin page (sent only to signed-in sessions): schedule CSV import, alert overview, SMS outbox and test box |
-| `admin/login.html` | Admin sign-in form |
+| `admin/login.html`, `setup.html`, `password.html` | Sign-in, first-admin setup and change-password forms |
+| `lib/admins.js` | Admin accounts: scrypt password hashes, sessions, audit log |
+| `admin-cli.js` | `npm run admin`: list, create, reset, disable admins |
 | `test/` | `node --test` suites |
 
 ## API
@@ -114,7 +138,10 @@ Browsers allow notifications and push only on `localhost` or HTTPS. To try it on
 | `POST /api/sms/verify` `{device, phone, code}` | Confirm the code; alerts start |
 | `POST /api/sms/stop` `{device, phone}` | Stop (only from the device that signed up) |
 | `POST /api/sms/inbound?key=K` form `from, text` | Africa's Talking incoming-SMS webhook |
-| `POST /admin/login` form `token` · `POST /admin/logout` | Sign the admin in or out |
+| `POST /admin/setup` · `/admin/login` · `/admin/password` · `/admin/logout` (forms) | First admin, sign in, change password, sign out |
+| `GET /api/admin/admins` · `POST /api/admin/admins` `{username}` | List admins, add one (returns a temporary password) |
+| `POST /api/admin/admins/reset` `{id}` · `/disable` `{id, disabled}` | Reset password, disable or enable |
+| `GET /api/admin/audit` | Recent admin activity |
 | `POST /api/admin/slots` `{csv, replace}` (admin session or `X-Admin-Token`) | Import schedule |
 | `GET /api/admin/overview` (admin session or `X-Admin-Token`) | Subscriber counts and recent SMS |
 

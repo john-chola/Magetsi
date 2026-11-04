@@ -1,5 +1,5 @@
 // Magetsi service worker: offline app shell + last-known API answers, Web Push, and notification clicks.
-const CACHE = 'magetsi-v2';
+const CACHE = 'magetsi-v3';
 const SHELL = ['./', 'index.html', 'app.js', 'core.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', (e) => {
@@ -16,6 +16,8 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
   if (url.pathname.endsWith('.csv')) return; // downloads go straight to the network
+  // Admin pages and admin data are never cached on the phone, and never replaced by the app when offline.
+  if (/\/admin(\/|$)/.test(url.pathname)) return;
   // Network first for everything (data must be fresh); fall back to cache when offline.
   e.respondWith(
     fetch(req)

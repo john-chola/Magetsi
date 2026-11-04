@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Magetsi admin: create the first admin</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/admin-auth.css">
+</head>
+<body>
+<main class="wrap">
+  <h1>Create the first admin</h1>
+  <p>There are no admin accounts yet. Enter the setup token printed in the server console when it started (or your <code>ADMIN_TOKEN</code>), then choose a username and password. You can add more admins afterwards.</p>
+  <form method="post" action="/admin/setup">
+    <label for="token">Setup token</label>
+    <input id="token" name="token" type="password" autocomplete="off" required autofocus>
+    <label for="username">Username</label>
+    <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{2,31}" title="3 to 32 letters, digits, dot, dash or underscore" required>
+    <label for="password">Password (at least 10 characters)</label>
+    <input id="password" name="password" type="password" autocomplete="new-password" minlength="10" required>
+    <label for="confirm">Password again</label>
+    <input id="confirm" name="confirm" type="password" autocomplete="new-password" minlength="10" required>
+    <div class="bad" role="alert"><!--ERROR--></div>
+    <button type="submit">Create admin and sign in</button>
+  </form>
+</main>
+</body>
+</html>

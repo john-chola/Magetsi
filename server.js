@@ -10,17 +10,14 @@ const { DatabaseSync } = require('node:sqlite');
 const core = require('./public/core.js');
 const webpush = require('./lib/webpush.js');
 const { createSms } = require('./lib/sms.js');
+const { adminStore, tempPassword } = require('./lib/admins.js');
 
 const PORT = Number(process.env.PORT || 3000);
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, 'magetsi.db');
 const PUBLIC = path.join(__dirname, 'public');
 const SEED_DEMO = process.env.SEED_DEMO !== '0';
-let ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-if (!ADMIN_TOKEN) {
-  ADMIN_TOKEN = crypto.randomBytes(6).toString('hex');
-  console.log(`[magetsi] No ADMIN_TOKEN set. Admin token for this run: ${ADMIN_TOKEN}`);
-}
-const SMS_INBOUND_KEY = process.env.SMS_INBOUND_KEY || ADMIN_TOKEN;
+// Optional. Lets scripts call /api/admin/* with an X-Admin-Token header, and is the setup token on a fresh install.
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || null;
 const SMS_DAILY_LIMIT = Number(process.env.SMS_DAILY_LIMIT || 2000);
 const SMS_SHORTCODE = process.env.AT_SHORTCODE || null;
 const PUSH_ALLOW_ANY = process.env.PUSH_ALLOW_ANY_ENDPOINT === '1'; // tests only
@@ -75,12 +72,29 @@ db.exec(`
     phone TEXT NOT NULL, message TEXT NOT NULL, kind TEXT NOT NULL,
     status TEXT, provider_id TEXT, created_at INTEGER NOT NULL);
   CREATE INDEX IF NOT EXISTS sms_outbox_time ON sms_outbox(created_at);
-  CREATE TABLE IF NOT EXISTS admin_sessions (id_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL);
 `);
 // databases from before towns existed
 if (!db.prepare('PRAGMA table_info(areas)').all().some((c) => c.name === 'town')) {
   db.exec("ALTER TABLE areas ADD COLUMN town TEXT NOT NULL DEFAULT 'Lusaka'");
 }
+
+const admins = adminStore(db);
+
+// Setup token: needed to create the first admin, so whoever finds a fresh server first can't take it over.
+let SETUP_TOKEN = null;
+if (admins.count() === 0) {
+  SETUP_TOKEN = ADMIN_TOKEN || crypto.randomBytes(9).toString('base64url');
+  if (require.main === module) console.log(`[magetsi] No admin account yet. Open /admin and enter this setup token: ${SETUP_TOKEN}`);
+}
+
+// Secret in the Africa's Talking callback URL
+const SMS_INBOUND_KEY = process.env.SMS_INBOUND_KEY || ADMIN_TOKEN || (() => {
+  const row = db.prepare("SELECT v FROM kv WHERE k = 'sms_inbound_key'").get();
+  if (row) return row.v;
+  const k = crypto.randomBytes(12).toString('base64url');
+  db.prepare("INSERT INTO kv (k, v) VALUES ('sms_inbound_key', ?)").run(k);
+  return k;
+})();
 
 function seed() {
   const hasAreas = db.prepare('SELECT COUNT(*) n FROM areas').get().n > 0;
@@ -165,11 +179,6 @@ const q = {
   unclaim: db.prepare('DELETE FROM sent_alerts WHERE channel = ? AND target = ? AND tag = ?'),
   pruneSent: db.prepare('DELETE FROM sent_alerts WHERE sent_at < ?'),
 
-  sessionAdd: db.prepare('INSERT INTO admin_sessions (id_hash, expires) VALUES (?, ?)'),
-  sessionGet: db.prepare('SELECT 1 FROM admin_sessions WHERE id_hash = ? AND expires > ?'),
-  sessionDelete: db.prepare('DELETE FROM admin_sessions WHERE id_hash = ?'),
-  sessionPrune: db.prepare('DELETE FROM admin_sessions WHERE expires <= ?'),
-
   outboxAdd: db.prepare('INSERT INTO sms_outbox (phone, message, kind, status, provider_id, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
   outboxSince: db.prepare("SELECT COUNT(*) n FROM sms_outbox WHERE created_at >= ? AND status <> 'over-limit'"),
   outboxRecent: db.prepare('SELECT phone, message, kind, status, created_at FROM sms_outbox ORDER BY id DESC LIMIT 30'),
@@ -219,6 +228,13 @@ function allow(key, max, windowMs = core.HOUR) {
   hits.set(key, list);
   return true;
 }
+// Failed-attempt limits for sign-in: check before, count only failures.
+const FAIL_WINDOW = 15 * core.MIN, FAIL_MAX = 10;
+function failedTooOften(...keys) {
+  const now = Date.now();
+  return keys.some((k) => { const l = (hits.get(k) || []).filter((t) => now - t < FAIL_WINDOW); hits.set(k, l); return l.length >= FAIL_MAX; });
+}
+function countFailure(...keys) { const now = Date.now(); for (const k of keys) { const l = hits.get(k) || []; l.push(now); hits.set(k, l); } }
 const allowWrite = (deviceId) => allow('w:' + deviceId, core.RULES.writesPerHour);
 setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (!v.some((t) => now - t < core.DAY)) hits.delete(k); }, core.HOUR).unref();
 
@@ -255,68 +271,138 @@ const sameHash = (a, b) => typeof a === 'string' && typeof b === 'string' && a.l
 const maskPhone = (p) => p.slice(0, 7) + '***' + p.slice(-3);
 
 // ---------- admin sign-in ----------
-// The admin page lives outside public/ and is only sent to a signed-in session.
-// Sign in with ADMIN_TOKEN -> random session id in an HttpOnly, SameSite=Strict cookie (only its hash is stored).
-// Scripts can still call /api/admin/* with an X-Admin-Token header.
+// The admin pages live outside public/ and are only sent to a signed-in admin.
+// Each admin has a username and password (lib/admins.js). Signing in sets a random session id
+// in an HttpOnly, SameSite=Strict cookie; only its hash is stored.
 const ADMIN_DIR = path.join(__dirname, 'admin');
 const SESSION_COOKIE = 'mg_admin';
 const SESSION_MS = 12 * core.HOUR;
-const tokenOk = (t) => typeof t === 'string' && t.length > 0 && sameHash(sha(t), sha(ADMIN_TOKEN));
+const tokenMatches = (t, want) => typeof t === 'string' && !!want && t.length > 0 && sameHash(sha(t), sha(want));
 
 function cookies(req) {
   const out = {};
   for (const part of String(req.headers.cookie || '').split(';')) {
     const i = part.indexOf('=');
-    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    if (i > 0) { try { out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); } catch { /* bad cookie */ } }
   }
   return out;
+}
+// Behind a reverse proxy (Render, Railway, Nginx, Cloudflare...) every request comes from the proxy's IP.
+// TRUST_PROXY=1 uses the last address the proxy appended to X-Forwarded-For instead.
+// Only set it when the app is reachable solely through that proxy, or clients could fake their IP.
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';
+function clientIp(req) {
+  if (TRUST_PROXY) {
+    const hops = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (hops.length) return hops[hops.length - 1];
+  }
+  return req.socket.remoteAddress || '?';
 }
 const isHttps = (req) => !!req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https';
 const sessionCookie = (req, value, maxAgeS) =>
   `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeS}${isHttps(req) ? '; Secure' : ''}`;
+const sidOf = (req) => cookies(req)[SESSION_COOKIE] || null;
 
-function isAdmin(req) {
-  if (tokenOk(req.headers['x-admin-token'])) return true;
-  const sid = cookies(req)[SESSION_COOKIE];
-  return !!(sid && q.sessionGet.get(sha(sid), Date.now()));
+/**
+ * The signed-in admin for this request, or null.
+ * api: true -> also accept the X-Admin-Token header (as a nameless admin), and refuse
+ * sessions that still have to change their temporary password.
+ */
+function adminFor(req, { api = false } = {}) {
+  if (api && tokenMatches(req.headers['x-admin-token'], ADMIN_TOKEN)) return { id: null, username: 'api-token' };
+  const a = admins.session(sidOf(req));
+  if (!a) return null;
+  if (api && a.must_change) return null;
+  return a;
 }
 
 const ADMIN_HEADERS = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' };
-function adminPage(res, status, file, error = '') {
+const escHtml = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function adminPage(res, status, file, vals = {}) {
   let html = fs.readFileSync(path.join(ADMIN_DIR, file), 'utf8');
-  if (error) html = html.replace('<!--ERROR-->', error);
+  for (const [k, v] of Object.entries(vals)) html = html.split(`<!--${k}-->`).join(escHtml(v));
   res.writeHead(status, ADMIN_HEADERS);
   res.end(html);
+  return true;
 }
-const redirect = (res, to, extra = {}) => { res.writeHead(303, { Location: to, 'Cache-Control': 'no-store', ...extra }); res.end(); };
+const redirect = (res, to, extra = {}) => { res.writeHead(303, { Location: to, 'Cache-Control': 'no-store', ...extra }); res.end(); return true; };
+const signIn = (req, res, admin) => redirect(res, '/admin', { 'Set-Cookie': sessionCookie(req, admins.startSession(admin.id, SESSION_MS), SESSION_MS / 1000) });
 
-/** /admin, /admin/login, /admin/logout. Returns true if handled. */
+/** /admin and its forms. Returns true if handled. */
 async function adminRoutes(req, res, url) {
   const p = url.pathname.replace(/\/+$/, '') || '/';
-  if (p === '/admin' && req.method === 'GET') {
-    adminPage(res, 200, isAdmin(req) ? 'admin.html' : 'login.html');
-    return true;
+  if (p !== '/admin' && !p.startsWith('/admin/')) return false;
+  const m = req.method;
+  const ip = clientIp(req);
+  const tooMany = (file, vals = {}) => adminPage(res, 429, file, { ...vals, ERROR: 'Too many attempts. Wait 15 minutes and try again.' });
+
+  if (p === '/admin' && m === 'GET') {
+    if (admins.count() === 0) return adminPage(res, 200, 'setup.html');
+    const me = adminFor(req);
+    if (!me) return adminPage(res, 200, 'login.html');
+    if (me.must_change) return adminPage(res, 200, 'password.html', { USER: me.username, NOTICE: 'You signed in with a temporary password. Choose your own to continue.' });
+    return adminPage(res, 200, 'admin.html', { USER: me.username });
   }
-  if (p === '/admin/login' && req.method === 'POST') {
-    const ip = req.socket.remoteAddress || '?';
-    if (!allow('login:' + ip, 10, 15 * core.MIN)) { adminPage(res, 429, 'login.html', 'Too many attempts. Wait 15 minutes and try again.'); return true; }
+
+  // First admin. Only works while there are no admins, and needs the setup token from the console.
+  if (p === '/admin/setup' && m === 'POST') {
+    if (admins.count() > 0) return redirect(res, '/admin');
+    if (failedTooOften('setup:' + ip)) return tooMany('setup.html');
     const body = await readForm(req);
-    if (!tokenOk(String(body.token || '').trim())) { adminPage(res, 401, 'login.html', 'Wrong admin token.'); return true; }
-    const sid = crypto.randomBytes(32).toString('base64url');
-    const now = Date.now();
-    q.sessionPrune.run(now);
-    q.sessionAdd.run(sha(sid), now + SESSION_MS);
-    redirect(res, '/admin', { 'Set-Cookie': sessionCookie(req, sid, SESSION_MS / 1000) });
-    return true;
+    if (!tokenMatches(String(body.token || '').trim(), SETUP_TOKEN)) return countFailure('setup:' + ip), adminPage(res, 401, 'setup.html', { ERROR: 'Wrong setup token. It is printed in the server console.' });
+    if (body.password !== body.confirm) return adminPage(res, 400, 'setup.html', { ERROR: 'The two passwords do not match.' });
+    const r = admins.create({ username: body.username, password: body.password });
+    if (r.error) return adminPage(res, 400, 'setup.html', { ERROR: r.error });
+    const admin = admins.get(r.id);
+    admins.audit(admin, 'setup', 'first admin created');
+    SETUP_TOKEN = null;
+    console.log(`[magetsi] First admin "${admin.username}" created.`);
+    return signIn(req, res, admin);
   }
-  if (p === '/admin/logout' && req.method === 'POST') {
-    const sid = cookies(req)[SESSION_COOKIE];
-    if (sid) q.sessionDelete.run(sha(sid));
-    redirect(res, '/admin', { 'Set-Cookie': sessionCookie(req, '', 0) });
-    return true;
+
+  if (p === '/admin/login' && m === 'POST') {
+    const body = await readForm(req);
+    const name = String(body.username || '').trim().toLowerCase().slice(0, 64);
+    if (failedTooOften('login:' + ip, 'login-user:' + name)) return tooMany('login.html');
+    const admin = await admins.check(name, String(body.password || ''));
+    if (!admin) {
+      countFailure('login:' + ip, 'login-user:' + name);
+      admins.audit(null, 'login-failed', name || '(blank)');
+      return adminPage(res, 401, 'login.html', { ERROR: 'Wrong username or password.' });
+    }
+    admins.audit(admin, 'login');
+    return signIn(req, res, admin);
   }
-  if (p.startsWith('/admin/')) { fail(res, 404, 'Not found'); return true; }
-  return false;
+
+  if (p === '/admin/password') {
+    const me = adminFor(req);
+    if (!me) return redirect(res, '/admin');
+    const notice = me.must_change ? 'Choose your own password to continue.' : '';
+    if (m === 'GET') return adminPage(res, 200, 'password.html', { USER: me.username, NOTICE: notice });
+    if (m !== 'POST') return fail(res, 405, 'Method not allowed'), true;
+    if (failedTooOften('pw:' + me.id)) return tooMany('password.html', { USER: me.username });
+    const body = await readForm(req);
+    const again = (msg) => adminPage(res, 400, 'password.html', { USER: me.username, ERROR: msg, NOTICE: notice });
+    if (!await admins.check(me.username, String(body.current || ''))) return countFailure('pw:' + me.id), again('Your current password is wrong.');
+    if (body.password !== body.confirm) return again('The two new passwords do not match.');
+    if (body.password === body.current) return again('Choose a password different from the current one.');
+    const r = admins.setPassword(me.id, body.password);
+    if (r.error) return again(r.error);
+    admins.endOtherSessions(me.id, sidOf(req));
+    admins.audit(me, 'password-change');
+    return redirect(res, '/admin');
+  }
+
+  if (p === '/admin/logout' && m === 'POST') {
+    const sid = sidOf(req);
+    const me = admins.session(sid);
+    if (me) admins.audit(me, 'logout');
+    admins.endSession(sid);
+    return redirect(res, '/admin', { 'Set-Cookie': sessionCookie(req, '', 0) });
+  }
+
+  fail(res, 404, 'Not found');
+  return true;
 }
 
 function serveStatic(req, res, pathname) {
@@ -591,7 +677,7 @@ async function api(req, res, url) {
   }
 
   if (m === 'POST' && p === '/api/sms/inbound') {
-    if (url.searchParams.get('key') !== SMS_INBOUND_KEY && !isAdmin(req)) return fail(res, 401, 'Wrong key');
+    if (url.searchParams.get('key') !== SMS_INBOUND_KEY && !adminFor(req, { api: true })) return fail(res, 401, 'Wrong key');
     const body = await readForm(req);
     const phone = core.normalizePhone(body.from);
     if (!phone) return send(res, 200, { ignored: 'Not a Zambian mobile number' });
@@ -641,7 +727,17 @@ async function api(req, res, url) {
   }
 
   // ----- admin -----
-  if (p.startsWith('/api/admin/') && !isAdmin(req)) return fail(res, 401, 'Sign in at /admin first');
+  if (p.startsWith('/api/admin/')) return adminApi(req, res, p, m, now);
+
+  return fail(res, 404, 'Unknown endpoint');
+}
+
+// ---------- admin API (signed-in admins; scripts with X-Admin-Token) ----------
+async function adminApi(req, res, p, m, now) {
+  const me = adminFor(req, { api: true });
+  if (!me) return fail(res, 401, 'Sign in at /admin first');
+  // A cross-site form can't send JSON, so requiring it blocks CSRF on top of the SameSite cookie.
+  if (m === 'POST' && !/^application\/json/.test(req.headers['content-type'] || '')) return fail(res, 415, 'Send JSON');
 
   if (m === 'POST' && p === '/api/admin/slots') {
     const body = await readJson(req);
@@ -658,6 +754,7 @@ async function api(req, res, url) {
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
     dashCache.clear();
+    admins.audit(me, 'schedule-import', `${slots.length} slot(s)${body.replace ? ', replacing' : ''}`);
     return send(res, 200, { saved: slots.length });
   }
 
@@ -668,8 +765,46 @@ async function api(req, res, url) {
       smsDriver: sms.driver,
       smsSentToday: smsSentToday(now),
       smsDailyLimit: SMS_DAILY_LIMIT,
+      smsInboundPath: '/api/sms/inbound?key=' + encodeURIComponent(SMS_INBOUND_KEY),
       outbox: q.outboxRecent.all().map((r) => ({ ...r, phone: maskPhone(r.phone) })),
     });
+  }
+
+  if (m === 'GET' && p === '/api/admin/me') return send(res, 200, { id: me.id, username: me.username });
+  if (m === 'GET' && p === '/api/admin/audit') return send(res, 200, { entries: admins.auditList(100) });
+
+  // Managing accounts needs a real signed-in admin, not the script token.
+  if (p === '/api/admin/admins' || p.startsWith('/api/admin/admins/')) {
+    if (!me.id) return fail(res, 403, 'Sign in as an admin to manage accounts');
+    if (m === 'GET' && p === '/api/admin/admins') return send(res, 200, { admins: admins.list().map((a) => ({ ...a, you: a.id === me.id })) });
+    if (m === 'POST') {
+      const body = await readJson(req);
+      if (p === '/api/admin/admins') {
+        const pw = tempPassword();
+        const r = admins.create({ username: body.username, password: pw, mustChange: true, by: me });
+        if (r.error) return fail(res, 400, r.error);
+        admins.audit(me, 'admin-create', r.username);
+        return send(res, 201, { username: r.username, tempPassword: pw });
+      }
+      const target = admins.get(Number(body.id));
+      if (!target) return fail(res, 404, 'No such admin');
+      if (p === '/api/admin/admins/reset') {
+        if (target.id === me.id) return fail(res, 400, 'Change your own password with "Change my password".');
+        const pw = tempPassword();
+        admins.setPassword(target.id, pw, { mustChange: true });
+        admins.endSessionsOf(target.id);
+        admins.audit(me, 'admin-reset-password', target.username);
+        return send(res, 200, { username: target.username, tempPassword: pw });
+      }
+      if (p === '/api/admin/admins/disable') {
+        const off = body.disabled !== false;
+        if (off && target.id === me.id) return fail(res, 400, 'You cannot disable yourself.');
+        const r = admins.setDisabled(target.id, off);
+        if (r.error) return fail(res, 400, r.error);
+        admins.audit(me, off ? 'admin-disable' : 'admin-enable', target.username);
+        return send(res, 200, { ok: true });
+      }
+    }
   }
 
   return fail(res, 404, 'Unknown endpoint');
@@ -696,7 +831,16 @@ if (require.main === module) {
   server.listen(PORT, () => {
     console.log(`[magetsi] Running at http://localhost:${PORT}  (admin: /admin, dashboard: /dashboard)`);
     console.log(`[magetsi] SMS: ${sms.driver}${sms.driver === 'log' ? ' (set AT_API_KEY to send real SMS)' : ''}`);
-    startAlertLoop();
+    const loop = startAlertLoop();
+    // Hosts send SIGTERM on redeploy: stop cleanly so the SQLite file is checkpointed and closed.
+    const stop = (sig) => {
+      console.log(`[magetsi] ${sig}: shutting down`);
+      clearInterval(loop);
+      server.close(() => { try { db.close(); } catch { /* already closed */ } process.exit(0); });
+      setTimeout(() => process.exit(0), 5000).unref();
+    };
+    process.once('SIGTERM', () => stop('SIGTERM'));
+    process.once('SIGINT', () => stop('SIGINT'));
   });
 }
-module.exports = { server, db, runAlerts, handleInbound };
+module.exports = { server, db, admins, runAlerts, handleInbound, setupToken: () => SETUP_TOKEN };

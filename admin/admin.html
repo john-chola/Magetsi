@@ -19,11 +19,24 @@
   pre { background: #211d17; border: 1px solid #3a3328; border-radius: 10px; padding: 12px; white-space: pre-wrap; font-size: 13px; }
   .ok { color: #5ad19a; } .bad { color: #ff6b4a; }
   table { border-collapse: collapse; width: 100%; font-size: 14px; } td, th { border-bottom: 1px solid #3a3328; padding: 6px 8px; text-align: left; } th { color: #b3a892; font-weight: 600; }
+  a { color: #ffb627; }
+  .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: #b3a892; font-size: 14px; margin-bottom: 18px; }
+  .top b { color: #f4ede0; }
+  button.small { margin: 0; padding: 6px 12px; font-size: 13px; }
+  button.ghost { background: #2b261e; color: #f4ede0; border: 1px solid #3a3328; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row input { max-width: 260px; }
+  .row button { margin-top: 0; }
+  .secret { color: #5ad19a; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 15px; user-select: all; }
+  .muted { color: #8a806d; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <form method="post" action="/admin/logout" style="float:right"><button type="submit" style="margin:0;padding:8px 14px;font-size:13px;background:#2b261e;color:#f4ede0;border:1px solid #3a3328">Sign out</button></form>
+  <div class="top">
+    <span>Signed in as <b><!--USER--></b> · <a href="/admin/password">Change my password</a></span>
+    <form method="post" action="/admin/logout"><button type="submit" class="small ghost">Sign out</button></form>
+  </div>
   <h1>Import a ZESCO schedule</h1>
   <p>Paste one outage slot per line as <code>group,date,start,end</code> in Lusaka time. An end time earlier than the start means the slot runs past midnight. <a href="/" style="color:#ffb627">Back to app</a></p>
   <label for="csv">Schedule CSV</label>
@@ -41,6 +54,13 @@ C,2026-11-02,22:00,02:00</textarea>
   <button id="simBtn">Send test SMS to Magetsi</button>
   <pre id="simOut" aria-live="polite">Commands: JOIN &lt;area&gt;, TIMES, STOP, HELP</pre>
   <table id="outbox"></table>
+  <h2 style="font-size:16px;margin-top:28px">Admins</h2>
+  <p>New admins get a temporary password, shown here once. Give it to them privately; they must choose their own password when they first sign in.</p>
+  <div class="row"><label for="newAdmin" style="margin:0">Username</label><input id="newAdmin" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="e.g. mwila"><button id="addAdmin" class="small">Add admin</button></div>
+  <pre id="adminOut" aria-live="polite" hidden></pre>
+  <table id="admins"></table>
+  <h2 style="font-size:16px;margin-top:28px">Recent activity</h2>
+  <table id="audit"></table>
   <h2 style="font-size:16px;margin-top:28px">Areas and groups</h2>
   <p><a href="/dashboard" style="color:#ffb627">Public adherence dashboard</a></p>
   <table id="areas"><tr><th>Area</th><th>Town</th><th>Group</th></tr></table>
@@ -73,7 +93,8 @@ C,2026-11-02,22:00,02:00</textarea>
       const j = await r.json();
       if (!r.ok) { ov.className = 'bad'; ov.textContent = j.error || 'Failed'; return; }
       ov.className = '';
-      ov.textContent = `${j.pushSubscribers} phone(s) with push alerts · ${j.smsSubscribers} SMS subscriber(s) · SMS sent today ${j.smsSentToday} of ${j.smsDailyLimit} · SMS mode: ${j.smsDriver}${j.smsDriver === 'log' ? ' (set AT_API_KEY to send real SMS)' : ''}`;
+      ov.textContent = `${j.pushSubscribers} phone(s) with push alerts · ${j.smsSubscribers} SMS subscriber(s) · SMS sent today ${j.smsSentToday} of ${j.smsDailyLimit} · SMS mode: ${j.smsDriver}${j.smsDriver === 'log' ? ' (set AT_API_KEY to send real SMS)' : ''}` +
+        ` · Africa's Talking incoming-SMS callback: ${location.origin}${j.smsInboundPath}`;
       const t = document.getElementById('outbox');
       t.innerHTML = '<tr><th>Time</th><th>To</th><th>Kind</th><th>Status</th><th>Message</th></tr>';
       for (const m of j.outbox) {
@@ -96,6 +117,74 @@ C,2026-11-02,22:00,02:00</textarea>
     } catch (e) { out.className = 'bad'; out.textContent = e.message; }
   };
   overview();
+
+  // ----- admins and activity -----
+  const when = (ms) => (ms ? new Date(ms).toLocaleString() : '–');
+  const postJson = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  function showSecret(text, secret) {
+    const box = document.getElementById('adminOut');
+    box.hidden = false; box.className = 'ok';
+    box.textContent = '';
+    box.append(text + ' ');
+    if (secret) { const s = document.createElement('span'); s.className = 'secret'; s.textContent = secret; box.append(s, '\nCopy it now: it will not be shown again.'); }
+  }
+  function showError(msg) { const box = document.getElementById('adminOut'); box.hidden = false; box.className = 'bad'; box.textContent = msg; }
+
+  async function loadAdmins() {
+    const r = await fetch('/api/admin/admins');
+    if (expired(r)) return;
+    const j = await r.json();
+    const t = document.getElementById('admins');
+    t.innerHTML = '<tr><th>Username</th><th>Status</th><th>Last sign-in</th><th>Added by</th><th></th></tr>';
+    for (const a of j.admins || []) {
+      const tr = t.insertRow();
+      tr.insertCell().textContent = a.username + (a.you ? ' (you)' : '');
+      tr.insertCell().textContent = a.disabled ? 'Disabled' : a.must_change ? 'Must set password' : 'Active';
+      tr.insertCell().textContent = when(a.last_login);
+      tr.insertCell().textContent = a.created_by || '–';
+      const c = tr.insertCell();
+      if (a.you) { c.className = 'muted'; continue; }
+      const btn = (label, fn) => { const b = document.createElement('button'); b.className = 'small ghost'; b.style.marginRight = '6px'; b.textContent = label; b.onclick = fn; c.append(b); };
+      btn('Reset password', async () => {
+        if (!confirm(`Give ${a.username} a new temporary password? They will be signed out.`)) return;
+        const x = await postJson('/api/admin/admins/reset', { id: a.id }); if (expired(x)) return;
+        const y = await x.json();
+        x.ok ? showSecret(`Temporary password for ${y.username}:`, y.tempPassword) : showError(y.error);
+        loadAdmins(); loadAudit();
+      });
+      btn(a.disabled ? 'Enable' : 'Disable', async () => {
+        if (!a.disabled && !confirm(`Disable ${a.username}? They will be signed out and cannot sign in.`)) return;
+        const x = await postJson('/api/admin/admins/disable', { id: a.id, disabled: !a.disabled }); if (expired(x)) return;
+        const y = await x.json();
+        if (!x.ok) showError(y.error);
+        loadAdmins(); loadAudit();
+      });
+    }
+  }
+  document.getElementById('addAdmin').onclick = async () => {
+    const name = document.getElementById('newAdmin').value.trim();
+    if (!name) return;
+    const r = await postJson('/api/admin/admins', { username: name }); if (expired(r)) return;
+    const j = await r.json();
+    if (!r.ok) return showError(j.error);
+    document.getElementById('newAdmin').value = '';
+    showSecret(`Admin "${j.username}" created. Temporary password:`, j.tempPassword);
+    loadAdmins(); loadAudit();
+  };
+
+  async function loadAudit() {
+    const r = await fetch('/api/admin/audit');
+    if (expired(r)) return;
+    const j = await r.json();
+    const t = document.getElementById('audit');
+    t.innerHTML = '<tr><th>Time</th><th>Who</th><th>What</th><th>Details</th></tr>';
+    for (const e of j.entries || []) {
+      const tr = t.insertRow();
+      [when(e.created_at), e.username || '–', e.action, e.detail || ''].forEach((v) => { tr.insertCell().textContent = v; });
+    }
+  }
+  loadAdmins(); loadAudit();
+  document.getElementById('go').addEventListener('click', () => setTimeout(loadAudit, 500));
 </script>
 </body>
 </html>

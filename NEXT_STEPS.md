@@ -9,7 +9,10 @@ the app, `/dashboard`, `/admin` (sign-in), SMS commands in log mode, and push al
 Double-click `start-public.cmd` in the `magetsi` folder. It opens two windows, "Magetsi" and "ngrok".
 To stop, press Ctrl+C in each window.
 
-**Demo for recruiters:** double-click `start-demo.cmd` instead. Same public link, but with a made-up schedule and
+**Always-on demo for your CV:** https://john-chola.github.io/Magetsi/ (GitHub Pages, rebuilt automatically on every
+push to `main`, works when the PC is off). It runs in the browser only: no push, SMS or admin.
+
+**Live demo for interviews:** double-click `start-demo.cmd` instead. Same public link, but with a made-up schedule and
 reports (kept in `magetsi-demo.db`) and a "Demo data" banner on every page. Only one of the two can run at a time:
 close the Magetsi window (Ctrl+C) before switching. The demo has its own admin account; the setup token is printed
 in its window the first time.

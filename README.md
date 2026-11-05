@@ -13,13 +13,15 @@ Households see their area's ZESCO load-shedding schedule, get alerts before powe
 ```bash
 npm start            # or: node server.js
 # app: http://localhost:3000   admin: /admin   dashboard: /dashboard
-npm test             # 50 unit + API tests
+npm test             # 51 unit + API tests
+npm run backup       # snapshot magetsi.db into backups/ (safe while running; keeps the newest 30)
 npm run build:demo   # dist/magetsi-demo.html, a single file that runs with no server (no push/SMS)
 ```
 
 - The first run creates `magetsi.db` (SQLite) with 55 areas in 5 towns, a demo 6-group rotation, and 7 days of synthetic household reports. Set `SEED_DEMO=0` for an empty schedule.
 - An existing database is upgraded on start: new tables are created and new areas from `public/core.js` are added. Existing data is kept.
 - Delete `magetsi.db` to start fresh.
+- On Windows with ngrok, double-click `start-public.cmd` to open Magetsi and the public link in two windows. Secrets such as `AT_API_KEY` can go in a git-ignored `.env` file (one `KEY=VALUE` per line), which the script loads.
 - Runs fine on a low-spec laptop: no npm packages and no build step.
 
 ## Settings (environment variables)
@@ -114,6 +116,8 @@ Browsers allow notifications and push only on `localhost` or HTTPS. To try it on
 | `admin/login.html`, `setup.html`, `password.html` | Sign-in, first-admin setup and change-password forms |
 | `lib/admins.js` | Admin accounts: scrypt password hashes, sessions, audit log |
 | `admin-cli.js` | `npm run admin`: list, create, reset, disable admins |
+| `backup.js` | `npm run backup`: consistent copy of the database into `backups/` |
+| `start-public.ps1`, `start-public.cmd` | Windows: start Magetsi and the ngrok link together, loading `.env` |
 | `test/` | `node --test` suites |
 
 ## API

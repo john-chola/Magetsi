@@ -19,3 +19,6 @@ node_modules/
 Thumbs.db
 .vscode/
 .idea/
+
+# Database backups (npm run backup)
+backups/

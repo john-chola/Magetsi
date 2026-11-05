@@ -4,6 +4,7 @@ Households see their area's ZESCO load-shedding schedule, get alerts before powe
 
 **[Try the live demo](https://john-chola.github.io/Magetsi/)**: runs in your browser with a made-up schedule and reports (clearly labelled), no sign-up. Push alerts, SMS and the admin page need the full server (see [Run it](#run-it-nodejs-225-or-newer-nothing-to-install)).
 
+<p><img src="docs/screenshots/now.jpg" alt="Now tab: Power OFF in Chamba Valley, scheduled back on at 18:00, with a live household report and a Power is back button" width="97%"></p>
 <p>
   <img src="docs/screenshots/schedule.png" alt="Schedule tab: the next 7 days of outage times for an area" width="32%">
   <img src="docs/screenshots/reliability.png" alt="Reliability tab: on-schedule percentage, unscheduled and late hours, scheduled vs actual per day" width="32%">
@@ -200,3 +201,7 @@ Browsers allow notifications and push only on `localhost` or HTTPS. To try it on
 2. Get an Africa's Talking shortcode and sender ID, and set a budget with `SMS_DAILY_LIMIT`.
 3. Host on HTTPS with `VAPID_SUBJECT` set, then test push on Android Chrome and an iPhone added to the home screen.
 4. USSD menu (`*xxx#`) as a second channel for basic phones.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

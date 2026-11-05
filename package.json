@@ -12,7 +12,8 @@
     "test": "node --disable-warning=ExperimentalWarning --test",
     "build:demo": "node build-demo.js",
     "admin": "node --disable-warning=ExperimentalWarning admin-cli.js",
-    "backup": "node --disable-warning=ExperimentalWarning backup.js"
+    "backup": "node --disable-warning=ExperimentalWarning backup.js",
+    "schedule": "node schedule-cli.js"
   },
   "license": "MIT"
 }

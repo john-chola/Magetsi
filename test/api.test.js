@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'magetsi-'));
 process.env.DB_FILE = path.join(tmp, 'test.db');
 process.env.ADMIN_TOKEN = 'test-token';
+process.env.SEED_DEMO = '1'; // schedule and stats tests need the demo data
 const { server, db } = require('../server.js');
 
 let base;
@@ -56,7 +57,7 @@ test('manual outage validation on the server', async () => {
 });
 
 test('admin import needs the token and saves slots', async () => {
-  const csv = 'group,date,start,end\nB,2030-01-01,06:00,10:00';
+  const csv = 'group,date,start,end\nLSK-B,2030-01-01,06:00,10:00';
   assert.equal((await post('/api/admin/slots', { csv }, { 'X-Admin-Token': 'nope' })).status, 401);
   const r = await post('/api/admin/slots', { csv, replace: true }, { 'X-Admin-Token': 'test-token' });
   assert.equal(r.body.saved, 1);

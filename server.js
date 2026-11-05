@@ -15,7 +15,8 @@ const { adminStore, tempPassword } = require('./lib/admins.js');
 const PORT = Number(process.env.PORT || 3000);
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, 'magetsi.db');
 const PUBLIC = path.join(__dirname, 'public');
-const SEED_DEMO = process.env.SEED_DEMO !== '0';
+// Made-up schedule and household reports for trying the app out. Off unless SEED_DEMO=1.
+const SEED_DEMO = process.env.SEED_DEMO === '1';
 // Optional. Lets scripts call /api/admin/* with an X-Admin-Token header, and is the setup token on a fresh install.
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || null;
 const SMS_DAILY_LIMIT = Number(process.env.SMS_DAILY_LIMIT || 2000);
@@ -77,6 +78,9 @@ db.exec(`
 if (!db.prepare('PRAGMA table_info(areas)').all().some((c) => c.name === 'town')) {
   db.exec("ALTER TABLE areas ADD COLUMN town TEXT NOT NULL DEFAULT 'Lusaka'");
 }
+if (!db.prepare('PRAGMA table_info(areas)').all().some((c) => c.name === 'retired')) {
+  db.exec('ALTER TABLE areas ADD COLUMN retired INTEGER NOT NULL DEFAULT 0');
+}
 
 const admins = adminStore(db);
 
@@ -96,38 +100,65 @@ const SMS_INBOUND_KEY = process.env.SMS_INBOUND_KEY || ADMIN_TOKEN || (() => {
   return k;
 })();
 
-function seed() {
-  const hasAreas = db.prepare('SELECT COUNT(*) n FROM areas').get().n > 0;
-  if (hasAreas) return;
-  const now = Date.now();
-  const insG = db.prepare('INSERT INTO groups (code, name) VALUES (?, ?)');
-  const insS = db.prepare('INSERT OR IGNORE INTO slots (group_code, date, start, "end", source, created_at) VALUES (?, ?, ?, ?, ?, ?)');
-  const insO = db.prepare('INSERT INTO outages (area_id, device_id, off_at, on_at, manual, flagged, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+// Bring groups and areas in line with public/core.js. Areas keep their ids, so saved areas and old
+// reports stay attached; areas no longer listed are retired (hidden, with the name freed up).
+function syncAreas() {
+  const upGroup = db.prepare('INSERT INTO groups (code, name) VALUES (?, ?) ON CONFLICT(code) DO UPDATE SET name = excluded.name');
+  const retire = db.prepare("UPDATE areas SET retired = 1, name = name || ' (retired #' || id || ')' WHERE id = ? AND retired = 0");
+  const upArea = db.prepare(`INSERT INTO areas (id, name, town, group_code, retired) VALUES (?, ?, ?, ?, 0)
+    ON CONFLICT(id) DO UPDATE SET name = excluded.name, town = excluded.town, group_code = excluded.group_code, retired = 0`);
+  const listed = new Set(core.AREAS.map((a) => a.id));
+  const before = new Map(db.prepare('SELECT id, name, group_code, retired FROM areas').all().map((r) => [r.id, r]));
+  const n = { added: 0, changed: 0, retired: 0 };
   db.exec('BEGIN');
-  core.GROUPS.forEach((g) => insG.run(g.code, g.name));
-  syncAreas();
-  if (SEED_DEMO) {
-    const start = core.addDays(core.lusakaDate(now), -8);
-    const slots = core.rotationSlots(start, 22); // 8 days back, 14 ahead
-    slots.forEach((s) => insS.run(s.group_code, s.date, s.start, s.end, s.source, now));
-    core.demoOutages(core.AREAS, slots, now, 7).forEach((o) =>
-      insO.run(o.area_id, o.device_id, o.offMs, o.onMs, 0, 0, now));
-  }
-  db.exec('COMMIT');
-  console.log(`[magetsi] Seeded ${core.AREAS.length} areas in ${core.TOWNS.length} towns${SEED_DEMO ? ' + demo schedule and reports' : ''}.`);
+  try {
+    core.GROUPS.forEach((g) => upGroup.run(g.code, g.name));
+    for (const id of before.keys()) if (!listed.has(id)) n.retired += Number(retire.run(id).changes);
+    for (const a of core.AREAS) {
+      const old = before.get(a.id);
+      if (!old) n.added++;
+      else if (old.name !== a.name || old.group_code !== a.group_code || old.retired) n.changed++;
+      upArea.run(a.id, a.name, a.town, a.group_code);
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return n;
 }
 
-// Add areas that core.AREAS has and the database doesn't yet (new towns). Existing rows are left alone.
-function syncAreas() {
-  const ins = db.prepare('INSERT OR IGNORE INTO areas (id, name, town, group_code) VALUES (?, ?, ?, ?)');
-  let added = 0;
-  for (const a of core.AREAS) added += Number(ins.run(a.id, a.name, a.town, a.group_code).changes);
-  return added;
+// One-off (data version 2): the old demo rotation used groups A-F shared by every town.
+// Remove it and the made-up household reports that went with it.
+function removeOldDemoData() {
+  db.exec('BEGIN');
+  const slots = db.prepare("DELETE FROM slots WHERE source = 'demo-rotation'").run().changes;
+  const outages = db.prepare("DELETE FROM outages WHERE device_id LIKE 'seed-%'").run().changes;
+  db.exec('COMMIT');
+  if (slots || outages) console.log(`[magetsi] Removed the old demo schedule (${slots} slots) and ${outages} made-up reports.`);
 }
-seed();
+
+// SEED_DEMO=1: a made-up rotation (8 days back, 14 ahead) and a week of synthetic reports, added once.
+function seedDemo() {
+  if (db.prepare("SELECT 1 FROM slots WHERE source = 'demo-rotation' LIMIT 1").get()) return;
+  const now = Date.now();
+  const insS = db.prepare('INSERT OR IGNORE INTO slots (group_code, date, start, "end", source, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+  const insO = db.prepare('INSERT INTO outages (area_id, device_id, off_at, on_at, manual, flagged, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+  const slots = core.rotationSlots(core.addDays(core.lusakaDate(now), -8), 22);
+  db.exec('BEGIN');
+  slots.forEach((s) => insS.run(s.group_code, s.date, s.start, s.end, s.source, now));
+  core.demoOutages(core.AREAS, slots, now, 7).forEach((o) => insO.run(o.area_id, o.device_id, o.offMs, o.onMs, 0, 0, now));
+  db.exec('COMMIT');
+  console.log('[magetsi] SEED_DEMO=1: added a DEMO schedule and synthetic reports. They are not real ZESCO data.');
+}
+
 {
-  const added = syncAreas();
-  if (added) console.log(`[magetsi] Added ${added} new area(s) from public/core.js.`);
+  const DATA_VERSION = '2';
+  const getKv = db.prepare('SELECT v FROM kv WHERE k = ?');
+  const fresh = db.prepare('SELECT COUNT(*) n FROM areas').get().n === 0;
+  if (!fresh && getKv.get('data_version')?.v !== DATA_VERSION) removeOldDemoData();
+  db.prepare("INSERT INTO kv (k, v) VALUES ('data_version', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(DATA_VERSION);
+  const r = syncAreas();
+  if (fresh) console.log(`[magetsi] Created ${core.AREAS.length} areas in ${core.TOWNS.length} towns.`);
+  else if (r.added || r.changed || r.retired) console.log(`[magetsi] Areas updated from public/core.js: ${r.added} added, ${r.changed} changed, ${r.retired} retired.`);
+  if (SEED_DEMO) seedDemo();
 }
 
 // Close outages left open for more than 24 h and flag them (left out of stats)
@@ -141,14 +172,13 @@ setInterval(autoClose, 10 * 60 * 1000).unref();
 
 // ---------- queries ----------
 const q = {
-  areas: db.prepare('SELECT a.id, a.name, a.town, a.group_code, g.name AS group_name FROM areas a JOIN groups g ON g.code = a.group_code ORDER BY a.town, a.name'),
-  area: db.prepare('SELECT id, name, town, group_code FROM areas WHERE id = ?'),
+  areas: db.prepare('SELECT a.id, a.name, a.town, a.group_code, g.name AS group_name FROM areas a JOIN groups g ON g.code = a.group_code WHERE a.retired = 0 ORDER BY a.town, a.name'),
+  area: db.prepare('SELECT id, name, town, group_code FROM areas WHERE id = ? AND retired = 0'),
   slots: db.prepare('SELECT id, group_code, date, start, "end" AS end, source FROM slots WHERE group_code = ? AND date BETWEEN ? AND ? ORDER BY date, start'),
   outagesSince: db.prepare('SELECT id, device_id, off_at, on_at, flagged FROM outages WHERE area_id = ? AND (on_at IS NULL OR on_at >= ?) AND off_at <= ?'),
   openForDevice: db.prepare('SELECT * FROM outages WHERE device_id = ? AND on_at IS NULL AND flagged = 0 ORDER BY off_at DESC LIMIT 1'),
   insertOutage: db.prepare('INSERT INTO outages (area_id, device_id, off_at, on_at, manual, flagged, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)'),
   closeOutage: db.prepare('UPDATE outages SET on_at = ? WHERE id = ?'),
-  groupCodes: db.prepare('SELECT code FROM groups'),
   upsertSlot: db.prepare('INSERT INTO slots (group_code, date, start, "end", source, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(group_code, date, start) DO UPDATE SET "end" = excluded."end", source = excluded.source, created_at = excluded.created_at'),
   deleteSlots: db.prepare('DELETE FROM slots WHERE group_code = ? AND date = ?'),
 
@@ -447,7 +477,7 @@ async function handleInbound(phone, text) {
     q.smsNew.run(phone, now, now);
     const daily = sub ? sub.daily : 1, before = sub ? sub.before_min : 30;
     q.smsActivate.run(c.area.id, daily, before, 'sms', sub ? sub.device_id : null, now, phone);
-    reply = `Magetsi: you will get alerts for ${c.area.name}, ${c.area.town} (Group ${c.area.group_code}). Reply TIMES for today, STOP to end.`;
+    reply = `Magetsi: you will get alerts for ${c.area.name}, ${c.area.town} (${core.groupName(c.area.group_code)}). Reply TIMES for today, STOP to end.`;
   } else if (c.cmd === 'stop') {
     if (sub) q.smsStop.run(now, phone);
     reply = 'Magetsi: alerts stopped. Text JOIN and your area to start again.';
@@ -741,7 +771,7 @@ async function adminApi(req, res, p, m, now) {
 
   if (m === 'POST' && p === '/api/admin/slots') {
     const body = await readJson(req);
-    const groups = q.groupCodes.all().map((r) => r.code);
+    const groups = core.GROUPS.map((g) => g.code);
     const { slots, errors } = core.parseScheduleCsv(String(body.csv || ''), groups);
     if (errors.length) return send(res, 400, { error: 'CSV has errors; nothing was saved.', errors });
     db.exec('BEGIN');

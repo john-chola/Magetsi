@@ -38,12 +38,9 @@
     <form method="post" action="/admin/logout"><button type="submit" class="small ghost">Sign out</button></form>
   </div>
   <h1>Import a ZESCO schedule</h1>
-  <p>Paste one outage slot per line as <code>group,date,start,end</code> in Lusaka time. An end time earlier than the start means the slot runs past midnight. <a href="/" style="color:#ffb627">Back to app</a></p>
+  <p>Paste one outage slot per line as <code>group,date,start,end</code> in Lusaka time. Groups are per town, e.g. <code>LSK-C</code> is Lusaka Group C (codes in the table below). An end time earlier than the start means the slot runs past midnight. To turn ZESCO's weekly grid into this CSV, use <code>npm run schedule</code> (see README). <a href="/" style="color:#ffb627">Back to app</a></p>
   <label for="csv">Schedule CSV</label>
-  <textarea id="csv" spellcheck="false">group,date,start,end
-B,2026-11-02,06:00,10:00
-B,2026-11-02,18:00,22:00
-C,2026-11-02,22:00,02:00</textarea>
+  <textarea id="csv" spellcheck="false" placeholder="group,date,start,end&#10;LSK-C,2026-11-02,05:00,13:00&#10;LSK-A,2026-11-02,18:00,02:00"></textarea>
   <div class="check"><input type="checkbox" id="replace" checked><label for="replace" style="margin:0">Replace existing slots for each group and date in this file</label></div>
   <button id="go">Import schedule</button>
   <pre id="out" aria-live="polite">Waiting…</pre>
@@ -82,7 +79,7 @@ C,2026-11-02,22:00,02:00</textarea>
   };
   fetch('/api/areas').then((r) => r.json()).then((j) => {
     const t = document.getElementById('areas');
-    for (const a of j.areas) { const tr = t.insertRow(); tr.insertCell().textContent = a.name; tr.insertCell().textContent = a.town; tr.insertCell().textContent = a.group_code; }
+    for (const a of j.areas) { const tr = t.insertRow(); tr.insertCell().textContent = a.name; tr.insertCell().textContent = a.town; tr.insertCell().textContent = `${a.group_code} (${a.group_name})`; }
   }).catch(() => {});
 
   async function overview() {

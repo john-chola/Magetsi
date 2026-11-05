@@ -52,7 +52,7 @@
     slotsFor(a) { return this.slots.filter((s) => s.group_code === a.group_code); },
     forArea(a) { return this.outages.filter((o) => o.area_id === a.id); },
     persist() { LS.set('demo.mine', this.outages.filter((o) => o.device_id === deviceId)); },
-    async areas() { return { areas: C.AREAS.map((a) => ({ ...a, group_name: `Group ${a.group_code}` })), groups: C.GROUPS }; },
+    async areas() { return { areas: C.AREAS.map((a) => ({ ...a, group_name: C.groupName(a.group_code) })), groups: C.GROUPS }; },
     async schedule(id) {
       const a = this.area(id), today = C.lusakaDate(Date.now()), end = C.addDays(today, 7), from = C.addDays(today, -1);
       return { area: a, slots: this.slotsFor(a).filter((s) => s.date >= from && s.date <= end) };
@@ -216,7 +216,7 @@
     el.innerHTML = `
       ${areaSwitcher()}
       <div class="status ${off ? 'off' : 'on'}" aria-live="polite">
-        <div class="label"><span class="dot"></span>${esc(area.name)}${area.town && area.town !== 'Lusaka' ? ', ' + esc(area.town) : ''} · Group ${esc(area.group_code)}${st.scheduledOff !== off ? ' · from live reports' : ''}</div>
+        <div class="label"><span class="dot"></span>${esc(area.name)}${area.town && area.town !== 'Lusaka' ? ', ' + esc(area.town) : ''} · ${esc(C.groupName(area.group_code))}${st.scheduledOff !== off ? ' · from live reports' : ''}</div>
         <div class="big">${off ? 'Power OFF' : 'Power ON'}</div>
         <div class="sub">${sub}</div>
         ${countdown}
@@ -253,7 +253,7 @@
     if (!area) { el.innerHTML = '<div class="empty">Choose your area first.</div>'; return; }
     const now = Date.now(), today = C.lusakaDate(now);
     const ws = C.mergedWindows(curSlots());
-    let html = `${S.saved.length > 1 ? areaSwitcher() : ''}<h2>${esc(area.name)} · Group ${esc(area.group_code)} · next 7 days</h2>
+    let html = `${S.saved.length > 1 ? areaSwitcher() : ''}<h2>${esc(area.name)} · ${esc(C.groupName(area.group_code))} · next 7 days</h2>
       <div class="legend"><span><i style="background:#3b2f0c"></i>Power on</span><span><i style="background:repeating-linear-gradient(135deg,#3a1d14 0 3px,#4a2418 3px 6px);border:1px solid #ff6b4a"></i>Scheduled off</span></div>`;
     for (let i = 0; i < 7; i++) {
       const d = C.addDays(today, i);
@@ -273,7 +273,7 @@
         <div class="ticks"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
         <div class="slots">${chips}</div></div>`;
     }
-    if (!ws.length) html += '<div class="empty">No schedule published for this group yet.</div>';
+    if (!ws.length) html += '<div class="empty">No load-shedding schedule is published for this group right now. If the power goes off, tap <b>Power went off</b> on the Now tab so neighbours are alerted.</div>';
     el.innerHTML = html;
     bindSwitcher(el);
   }
@@ -539,7 +539,7 @@
   function openAreaDlg() {
     const dlg = $('#areaDlg');
     const list = $('#areaList');
-    const label = (a) => `${esc(a.name)}<span>${esc(a.town || '')} · Group ${esc(a.group_code)}</span>`;
+    const label = (a) => `${esc(a.name)}<span>${esc(a.town || '')} · ${esc(C.groupName(a.group_code))}</span>`;
     const draw = (q) => {
       const ql = q.trim().toLowerCase();
       let html = '';

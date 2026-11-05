@@ -338,41 +338,149 @@
     return { slots, errors };
   }
 
-  // ---------- seed data (Lusaka) ----------
-  const GROUPS = ['A', 'B', 'C', 'D', 'E', 'F'].map((c) => ({ code: c, name: `Group ${c}` }));
+  // ---------- groups and areas ----------
+  // ZESCO numbers its load-management groups per town: Lusaka's Group A and Kitwe's Group A are
+  // different feeders on different times. Codes are town prefix + letter, e.g. LSK-C.
+  const TOWN_GROUPS = {
+    Lusaka: { prefix: 'LSK', letters: ['A', 'B', 'C', 'D', 'E'] },
+    Kitwe: { prefix: 'KIT', letters: ['A', 'B', 'C'] },
+    Ndola: { prefix: 'NDL', letters: ['A', 'B', 'C', 'D'] },
+    Kabwe: { prefix: 'KBW', letters: ['A', 'B', 'C', 'D'] },
+    Livingstone: { prefix: 'LVS', letters: ['A', 'B', 'C'] },
+  };
+  const GROUPS = [];
+  for (const [town, { prefix, letters }] of Object.entries(TOWN_GROUPS)) {
+    for (const l of letters) GROUPS.push({ code: `${prefix}-${l}`, name: `Group ${l}`, town });
+  }
+  const groupCode = (town, letter) => `${TOWN_GROUPS[town].prefix}-${letter}`;
+  /** "Group C" for LSK-C; unknown codes are shown as they are. */
+  const groupName = (code) => (GROUPS.find((g) => g.code === code) || { name: `Group ${code}` }).name;
 
-  // Illustrative mapping only: ZESCO's real area-to-group list must replace this.
-  // Ids are stable: never renumber or reorder, only append.
+  // Area -> group, from ZESCO's load management schedule of March 2024 (the latest published at the
+  // time of writing). ZESCO lists by feeder, so a few neighbourhoods are split across groups street by
+  // street; each is listed here under the group that covers most of it.
+  // Kabwe: ZESCO lists the same areas under Groups A and B, which are always scheduled together;
+  // they are filed under A.
+  // Ids are stable: never renumber or reuse one. Append new areas with the next free id.
+  // Ids 12, 30, 47, 50 and 54 belonged to an earlier illustrative list and are retired.
   const TOWN_AREAS = {
     Lusaka: [
-      ['Avondale', 'A'], ['Bauleni', 'D'], ['Chainda', 'E'], ['Chalala', 'C'], ['Chawama', 'F'],
-      ['Chelston', 'A'], ['Chilenje', 'B'], ['Chudleigh', 'C'], ['Emmasdale', 'D'], ['Garden', 'E'],
-      ['Ibex Hill', 'F'], ['Jack Compound', 'A'], ['Kabulonga', 'B'], ['Kabwata', 'C'], ['Kalingalinga', 'D'],
-      ['Kamwala', 'E'], ['Kanyama', 'F'], ['Libala', 'A'], ['Makeni', 'B'], ['Matero', 'C'],
-      ['Mtendere', 'D'], ['Mutendere East', 'E'], ['Northmead', 'F'], ['Olympia', 'A'], ['Rhodes Park', 'B'],
-      ['Roma', 'C'], ['Woodlands', 'D'], ['Lilayi', 'E'], ['Chunga', 'F'], ['PHI', 'B'],
+      [1, 'Avondale', 'E'], [2, 'Bauleni', 'D'], [3, 'Chainda', 'B'], [4, 'Chalala', 'E'], [5, 'Chawama', 'D'],
+      [6, 'Chelstone', 'D'], [7, 'Chilenje', 'C'], [8, 'Chudleigh', 'C'], [9, 'Emmasdale', 'D'], [10, 'Garden', 'E'],
+      [11, 'Ibex Hill', 'B'], [13, 'Kabulonga', 'D'], [14, 'Kabwata', 'D'], [15, 'Kalingalinga', 'B'], [16, 'Kamwala', 'B'],
+      [17, 'Kanyama', 'D'], [18, 'Libala', 'B'], [19, 'Makeni', 'C'], [20, 'Matero', 'D'], [21, 'Mtendere', 'D'],
+      [22, 'Mtendere East', 'E'], [23, 'Northmead', 'D'], [24, 'Olympia', 'D'], [25, 'Rhodes Park', 'B'], [26, 'Roma', 'D'],
+      [27, 'Woodlands', 'E'], [28, 'Lilayi', 'B'], [29, 'Chunga', 'E'],
+      [56, 'Lusaka West', 'A'], [57, 'Light Industrial Area', 'A'], [58, 'Chinika Industrial Area', 'A'], [59, 'Soweto Market', 'A'],
+      [60, 'City Market', 'A'], [61, 'State Lodge', 'B'], [62, 'New Kasama', 'B'], [63, 'Fairview', 'C'], [64, 'Showgrounds', 'B'],
+      [65, 'Lusaka Town Centre', 'B'], [66, 'John Laing', 'B'], [67, 'Mass Media', 'B'], [68, 'Libala South', 'C'], [69, 'York Farm', 'B'],
+      [70, 'Kaunda Square', 'D'], [71, 'Hellen Kaunda', 'D'], [72, 'Kabulonga Extension', 'D'], [73, 'Makeni Villa', 'D'], [74, 'George', 'D'],
+      [75, 'Lilanda', 'E'], [76, 'Chipata Township', 'D'], [77, 'Kabanana', 'D'], [78, 'Chamba Valley', 'E'], [79, 'Chelstone Green', 'E'],
+      [80, 'Kalikiliki', 'E'], [81, 'Kamanga', 'E'], [82, 'Longacres', 'E'], [83, 'Salama Park', 'E'], [84, 'Meanwood Ndeke', 'E'],
+      [85, 'Silverest', 'E'], [86, 'Vorna Valley', 'E'], [87, 'Waterfalls', 'E'], [88, 'Chibolya', 'E'], [89, 'Misisi', 'E'],
+      [90, 'Ngombe', 'E'], [91, 'Kamwala South', 'E'], [92, 'Jesmondine', 'C'], [93, 'Marshlands', 'C'], [94, 'New Chilenje', 'C'],
+      [95, 'Nyumba Yanga', 'C'], [96, 'Woodlands Extension', 'C'], [97, 'Rockfield', 'C'], [98, 'Chazanga', 'C'], [99, 'Roma (Zambezi Road)', 'E'],
+      [100, 'Meanwood Kwamwena', 'D'],
     ],
-    Kitwe: [['Nkana East', 'A'], ['Nkana West', 'B'], ['Parklands', 'C'], ['Riverside', 'D'], ['Chimwemwe', 'E'], ['Buchi', 'F'], ['Kwacha', 'A'], ['Ndeke', 'B']],
-    Ndola: [['Kansenshi', 'C'], ['Itawa', 'D'], ['Northrise', 'E'], ['Chifubu', 'F'], ['Kabushi', 'A'], ['Masala', 'B'], ['Twapia', 'C']],
-    Kabwe: [['Bwacha', 'D'], ['Makandanyama', 'E'], ['Katondo', 'F'], ['Kasanda', 'A'], ['Mine Township', 'B']],
-    Livingstone: [['Dambwa', 'C'], ['Linda', 'D'], ['Maramba', 'E'], ['Libuyu', 'F'], ['Nottie Broadie', 'A']],
+    Kitwe: [
+      [31, 'Nkana East', 'B'], [32, 'Nkana West', 'C'], [33, 'Parklands', 'B'], [34, 'Riverside', 'B'], [35, 'Chimwemwe', 'B'],
+      [36, 'Buchi', 'A'], [37, 'Kwacha', 'B'], [38, 'Ndeke', 'C'],
+      [101, 'Wusakile', 'C'], [102, 'Chamboli', 'C'], [103, 'Mindolo', 'C'], [104, 'Mulenga Compound', 'C'], [105, 'Chipata Compound', 'C'],
+      [106, 'Kitwe CBD', 'C'], [107, 'Kalengwa', 'C'], [108, 'Kamitondo', 'A'], [109, 'Garneton', 'A'], [110, 'Twatasha', 'A'],
+      [111, 'Racecourse', 'A'], [112, 'Freetown', 'A'], [113, 'Buyantanshi', 'A'], [114, 'Chachacha', 'A'], [115, 'Kawama', 'A'],
+      [116, 'Kakolo', 'A'], [117, 'Kwacha East', 'A'], [118, 'Bulangililo', 'B'], [119, 'Kapoto', 'B'], [120, 'Changanamai', 'B'],
+      [121, 'Kitwe West', 'B'], [122, 'Kamakonde', 'B'], [123, 'Zambia Township', 'A'],
+    ],
+    Ndola: [
+      [39, 'Kansenshi', 'B'], [40, 'Itawa', 'B'], [41, 'Northrise', 'A'], [42, 'Chifubu', 'B'], [43, 'Kabushi', 'A'],
+      [44, 'Masala', 'B'], [45, 'Twapia', 'A'],
+      [124, 'Ndola Villa', 'A'], [125, 'Pamodzi', 'A'], [126, 'Nkwazi', 'A'], [127, 'Kawama Township', 'A'], [128, 'Kaniki', 'A'],
+      [129, 'Chipulukusu', 'A'], [130, 'Lubuto', 'A'], [131, 'Mushili', 'A'], [132, 'Kaloko', 'A'], [133, 'Kantolomba', 'A'],
+      [134, 'Hillcrest', 'B'], [135, 'Ndeke (Ndola)', 'B'], [136, 'Kalewa', 'B'], [137, 'Dola Hill', 'B'], [138, 'Peter Singogo', 'B'],
+      [139, 'Mitengo', 'B'], [140, 'Mapalo', 'B'], [141, 'Jacaranda Villa', 'B'], [142, 'Ndola Town Centre', 'C'],
+      [143, 'Ndola Industrial Area', 'C'], [144, 'Broadway', 'C'], [145, 'Kanini', 'D'], [146, 'Skyways', 'D'], [147, 'Fatima', 'D'],
+    ],
+    Kabwe: [
+      [46, 'Bwacha', 'A'], [48, 'Katondo', 'D'], [49, 'Kasanda', 'A'],
+      [148, 'Ngungu', 'A'], [149, 'Chimanimani', 'A'], [150, 'Natuseko', 'A'], [151, 'Makululu', 'A'], [152, 'Mukobeko', 'C'],
+      [153, 'Luangwa', 'C'], [154, 'Kalonga', 'C'], [155, 'Nkrumah', 'C'], [156, 'Lukanga', 'C'], [157, 'Makwati', 'C'],
+      [158, 'Highridge', 'D'], [159, 'Chowa', 'D'], [160, 'Kabwe Town Centre', 'D'],
+    ],
+    Livingstone: [
+      [51, 'Dambwa', 'A'], [52, 'Linda', 'B'], [53, 'Maramba', 'B'], [55, 'Nottie Broadie', 'A'],
+      [161, 'Highlands', 'A'], [162, 'Ellaine Brittle', 'A'], [163, 'Dambwa Industrial Area', 'B'], [164, 'Fairmount', 'B'],
+      [165, 'Ngwenya', 'B'], [166, 'Livingstone Town Centre', 'B'], [167, 'Mukuni', 'C'], [168, 'Nakatindi', 'C'], [169, 'Kazungula Road', 'C'],
+    ],
   };
+  const RETIRED_AREA_IDS = [12, 30, 47, 50, 54];
   const TOWNS = Object.keys(TOWN_AREAS);
   const AREAS = [];
-  for (const town of TOWNS) for (const [name, group_code] of TOWN_AREAS[town]) AREAS.push({ id: AREAS.length + 1, name, town, group_code });
+  for (const town of TOWNS) {
+    for (const [id, name, letter] of TOWN_AREAS[town]) AREAS.push({ id, name, town, group_code: groupCode(town, letter) });
+  }
 
-  // Six 4-hour bands; each group is off for two bands a day (8 h), rotating daily.
+  // ---------- ZESCO weekly patterns -> slots ----------
+  const cellLetters = (cell) => String(cell).split(/[&+,]/).map((x) => x.trim().toUpperCase()).filter(Boolean);
+  /**
+   * ZESCO publishes a grid: time bands down the side, dates across, a group letter in each cell,
+   * repeating every few weeks. A pattern captures one town's grid:
+   *   { start: '2024-03-11', days: 7, bands: ['05:00-13:00', ...], cycle: [['C', 'D', 'E'], ['D', 'E', 'C'], ...] }
+   * cycle[k][i] is the group(s) off in bands[i] during the k-th block of `days` days from `start`
+   * ('A&B' for two groups, '' for none). The cycle repeats before and after the published dates.
+   * Returns {slots, errors}; slot group codes carry the town prefix (LSK-C).
+   */
+  function patternSlots(town, pattern, fromDate, toDate) {
+    const tg = TOWN_GROUPS[town];
+    if (!tg) return { slots: [], errors: [`Unknown town "${town}" (known: ${TOWNS.join(', ')})`] };
+    const errors = [];
+    const { start, bands, cycle } = pattern || {};
+    const days = pattern && pattern.days != null ? pattern.days : 7;
+    if (!isValidDate(start)) errors.push(`${town}: start must be a date like 2024-03-11`);
+    if (!Number.isInteger(days) || days < 1) errors.push(`${town}: days must be a whole number`);
+    if (!Array.isArray(bands) || !bands.length) errors.push(`${town}: bands is missing`);
+    if (!Array.isArray(cycle) || !cycle.length) errors.push(`${town}: cycle is missing`);
+    if (!isValidDate(fromDate) || !isValidDate(toDate) || toDate < fromDate) errors.push('from and to must be dates (YYYY-MM-DD), from first');
+    if (errors.length) return { slots: [], errors };
+    const times = bands.map((b, i) => {
+      const [s, e] = String(b).split('-').map((x) => x.trim());
+      if (!isValidTime(s) || !isValidTime(e) || s === e) errors.push(`${town}: band ${i + 1} "${b}" should look like 05:00-13:00`);
+      return [s, e];
+    });
+    cycle.forEach((row, k) => {
+      if (!Array.isArray(row) || row.length !== bands.length) return errors.push(`${town}: cycle block ${k + 1} needs one entry per band (${bands.length})`);
+      for (const cell of row) for (const l of cellLetters(cell)) {
+        if (!tg.letters.includes(l)) errors.push(`${town}: cycle block ${k + 1} has unknown group "${l}"`);
+      }
+    });
+    if (errors.length) return { slots: [], errors };
+
+    const slots = [];
+    const startMs = toMs(start, '12:00');
+    for (let d = fromDate; d <= toDate; d = addDays(d, 1)) {
+      const offset = Math.round((toMs(d, '12:00') - startMs) / DAY);
+      const k = ((Math.floor(offset / days) % cycle.length) + cycle.length) % cycle.length;
+      cycle[k].forEach((cell, i) => {
+        for (const l of cellLetters(cell)) slots.push({ group_code: groupCode(town, l), date: d, start: times[i][0], end: times[i][1] });
+      });
+    }
+    return { slots, errors };
+  }
+
+  // ---------- demo data ----------
+  // Six 4-hour bands; in each town every group is off for two bands a day (8 h), rotating daily.
   const BANDS = [['02:00', '06:00'], ['06:00', '10:00'], ['10:00', '14:00'], ['14:00', '18:00'], ['18:00', '22:00'], ['22:00', '02:00']];
   function rotationSlots(startDate, days) {
     const out = [];
     for (let d = 0; d < days; d++) {
       const date = addDays(startDate, d);
-      GROUPS.forEach((g, gi) => {
-        for (const k of [0, 3]) {
-          const [start, end] = BANDS[(gi + d + k) % 6];
-          out.push({ group_code: g.code, date, start, end, source: 'demo-rotation' });
-        }
-      });
+      for (const town of TOWNS) {
+        TOWN_GROUPS[town].letters.forEach((l, gi) => {
+          for (const k of [0, 3]) {
+            const [start, end] = BANDS[(gi + d + k) % 6];
+            out.push({ group_code: groupCode(town, l), date, start, end, source: 'demo-rotation' });
+          }
+        });
+      }
     }
     return out;
   }
@@ -426,6 +534,6 @@
     validateManualOutage, parseScheduleCsv,
     DEFAULT_SETTINGS, LEAD_CHOICES, isQuietHour, cleanSettings, dueAlerts,
     normalizePhone, todayWindowsText, smsDue, parseSmsCommand, dashboardCsv,
-    GROUPS, TOWNS, AREAS, BANDS, rotationSlots, demoOutages,
+    TOWN_GROUPS, GROUPS, groupCode, groupName, TOWNS, AREAS, RETIRED_AREA_IDS, patternSlots, BANDS, rotationSlots, demoOutages,
   };
 });

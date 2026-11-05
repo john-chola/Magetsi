@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'magetsi-alerts-'));
 process.env.DB_FILE = path.join(tmp, 'test.db');
 process.env.ADMIN_TOKEN = 'test-token';
+process.env.SEED_DEMO = '1'; // alert and dashboard tests need the demo schedule and reports
 process.env.PUSH_ALLOW_ANY_ENDPOINT = '1'; // the fake push service is plain http on localhost
 delete process.env.AT_API_KEY; // SMS in log mode: messages land in sms_outbox
 const C = require('../public/core.js');
@@ -119,7 +120,7 @@ const phone = '+260971234567';
 test('SMS inbound: JOIN, TIMES, STOP, and the webhook key', async () => {
   assert.equal((await form('/api/sms/inbound?key=wrong', { from: phone, text: 'JOIN CHILENJE' })).status, 401);
   const j = await form('/api/sms/inbound?key=test-token', { from: phone, text: 'join chilenje', to: '1234' });
-  assert.match(j.body.reply, /alerts for Chilenje, Lusaka \(Group B\)/);
+  assert.match(j.body.reply, /alerts for Chilenje, Lusaka \(Group C\)/);
   const t = await form('/api/sms/inbound?key=test-token', { from: phone, text: 'TIMES' });
   assert.match(t.body.reply, /Chilenje/);
   const amb = await form('/api/sms/inbound?key=test-token', { from: '0961111111', text: 'JOIN KAB' });

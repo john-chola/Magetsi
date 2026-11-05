@@ -109,7 +109,7 @@
     document.querySelector('#tbl tbody').innerHTML = rows.map((r) => {
       const v = (x, suffix = '') => (r.enough && x != null ? x + suffix : '<span class="thin">–</span>');
       const pct = r.enough ? `<span class="pct"><i><span style="width:${r.onSchedulePct}%;background:${color(r.onSchedulePct)}"></span></i>${r.onSchedulePct}%</span>` : '<span class="thin">not enough reports</span>';
-      return `<tr><td>${esc(r.name)}</td><td>${esc(r.town)}</td><td>${esc(r.group_code)}</td><td class="n">${pct}</td>
+      return `<tr><td>${esc(r.name)}</td><td>${esc(r.town)}</td><td>${esc(C.groupName(r.group_code))}</td><td class="n">${pct}</td>
         <td class="n">${v(r.extraHoursPerDay)}</td><td class="n">${v(r.lateRestoreMinPerDay)}</td><td class="n">${v(r.actualHoursPerDay)}</td>
         <td class="n">${r.scheduledHoursPerDay}</td><td class="n">${r.households}</td></tr>`;
     }).join('') || '<tr><td>No areas.</td></tr>';

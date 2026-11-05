@@ -6,20 +6,22 @@ Households see their area's ZESCO load-shedding schedule, get alerts before powe
 - **SMS alerts** work on any phone, with no data needed (through Africa's Talking).
 - **Up to 5 saved areas** per phone (home, work, family). Alerts cover all of them.
 - **A public dashboard** at `/dashboard` compares every area, with a CSV download.
-- **Towns:** Lusaka, Kitwe, Ndola, Kabwe and Livingstone.
+- **Towns:** Lusaka, Kitwe, Ndola, Kabwe and Livingstone, with 164 areas mapped to ZESCO's groups.
 
 ## Run it (Node.js 22.5 or newer, nothing to install)
 
 ```bash
 npm start            # or: node server.js
 # app: http://localhost:3000   admin: /admin   dashboard: /dashboard
-npm test             # 51 unit + API tests
+npm test             # 60 unit + API tests
+npm run schedule     # turn ZESCO's weekly grid into import CSV (see below)
 npm run backup       # snapshot magetsi.db into backups/ (safe while running; keeps the newest 30)
 npm run build:demo   # dist/magetsi-demo.html, a single file that runs with no server (no push/SMS)
 ```
 
-- The first run creates `magetsi.db` (SQLite) with 55 areas in 5 towns, a demo 6-group rotation, and 7 days of synthetic household reports. Set `SEED_DEMO=0` for an empty schedule.
-- An existing database is upgraded on start: new tables are created and new areas from `public/core.js` are added. Existing data is kept.
+- The first run creates `magetsi.db` (SQLite) with 164 areas in 5 towns and **no schedule** (see [Importing a schedule](#importing-a-schedule)).
+- To try the app with made-up data, start with `SEED_DEMO=1`: it adds a demo rotation and a week of synthetic household reports. They are not real ZESCO data.
+- An existing database is upgraded on start: new tables are created, and areas and groups are brought in line with `public/core.js`. Existing data is kept.
 - Delete `magetsi.db` to start fresh.
 - On Windows with ngrok, double-click `start-public.cmd` to open Magetsi and the public link in two windows. Secrets such as `AT_API_KEY` can go in a git-ignored `.env` file (one `KEY=VALUE` per line), which the script loads.
 - Runs fine on a low-spec laptop: no npm packages and no build step.
@@ -83,17 +85,50 @@ npm run admin -- disable <username>
 - `ADMIN_TOKEN` is optional. If set, scripts can call `/api/admin/*` (except account management) with an `X-Admin-Token` header, and it serves as the setup token.
 - Upgrading from the shared-token version signs everyone out. Create the first admin with the setup token or `npm run admin -- create`.
 
-## Importing a real schedule
+## Areas and groups
 
-Sign in at `/admin` and paste CSV in Zambia time (CAT, UTC+2):
+ZESCO splits each town into load-management **groups** (feeders) and publishes which areas each group covers. Groups are numbered per town: Lusaka's Group A and Kitwe's Group A are different feeders on different times. So group codes carry a town prefix:
+
+| Town | Codes |
+| --- | --- |
+| Lusaka | `LSK-A` to `LSK-E` |
+| Kitwe | `KIT-A` to `KIT-C` |
+| Ndola | `NDL-A` to `NDL-D` |
+| Kabwe | `KBW-A` to `KBW-D` |
+| Livingstone | `LVS-A` to `LVS-C` |
+
+The 164 areas in `public/core.js` (`TOWN_AREAS`) come from ZESCO's load management schedule of **March 2024**. That was the latest one published: in June 2026 ZESCO said it did not expect nationwide load management to return. ZESCO lists areas feeder by feeder, so a few neighbourhoods are split between groups street by street. Each one is filed under the group that covers most of it.
+
+Area ids are stable, because saved areas, SMS sign-ups and outage reports point at them. To add an area, give it the next free id. Never renumber or reuse one. An area removed from the list is **retired** on the next start: it is hidden, and its old reports are kept.
+
+## Importing a schedule
+
+**From ZESCO's grid.** ZESCO publishes a table with time bands down the side, dates across, and a group letter in each cell. The table repeats every few weeks. Copy one cycle into a pattern file (see [`schedules/zesco-2024-03.json`](schedules/zesco-2024-03.json)):
+
+```json
+{ "towns": { "Lusaka": {
+  "start": "2024-03-11", "days": 7,
+  "bands": ["18:00-02:00", "00:00-08:00", "05:00-13:00", "09:00-17:00", "15:00-23:00"],
+  "cycle": [["A","B","C","D","E"], ["A","B","D","E","C"], ["A","B","E","C","D"]] } } }
+```
+
+`cycle[k][i]` is the group that is off in band `i` during week `k`. Use `"A&B"` for two groups and `""` for none. Then turn the pattern into CSV for any dates:
+
+```bash
+npm run schedule -- schedules/my-schedule.json --from 2026-11-09 --days 28 --out schedule.csv
+```
+
+**The CSV itself.** Sign in at `/admin` and paste one slot per line, in Zambia time (CAT, UTC+2):
 
 ```
 group,date,start,end
-B,2026-11-02,06:00,10:00
-C,2026-11-02,22:00,02:00   <- end before start = runs past midnight
+LSK-C,2026-11-09,05:00,13:00
+LSK-A,2026-11-09,18:00,02:00   <- end before start = runs past midnight
 ```
 
-The towns, areas and group mapping in `public/core.js` (`TOWN_AREAS`) are **illustrative**. Replace them with ZESCO's published lists. Area ids must stay stable: only add new areas at the end of a town's list or as a new town, and never reorder.
+With no schedule imported, the app says no schedule is published and still works as an outage log: households report outages, and neighbours get alerted when several report at once.
+
+`schedules/zesco-2024-03.json` is a historical example. Don't import it as a current schedule.
 
 ## Testing on your phone
 
@@ -116,6 +151,7 @@ Browsers allow notifications and push only on `localhost` or HTTPS. To try it on
 | `admin/login.html`, `setup.html`, `password.html` | Sign-in, first-admin setup and change-password forms |
 | `lib/admins.js` | Admin accounts: scrypt password hashes, sessions, audit log |
 | `admin-cli.js` | `npm run admin`: list, create, reset, disable admins |
+| `schedule-cli.js`, `schedules/` | `npm run schedule`: ZESCO pattern file to import CSV, with a March 2024 example |
 | `backup.js` | `npm run backup`: consistent copy of the database into `backups/` |
 | `start-public.ps1`, `start-public.cmd` | Windows: start Magetsi and the ngrok link together, loading `.env` |
 | `test/` | `node --test` suites |
@@ -151,7 +187,7 @@ Browsers allow notifications and push only on `localhost` or HTTPS. To try it on
 
 ## Next steps
 
-1. Replace the illustrative areas and groups with ZESCO's published lists for each town.
+1. When ZESCO publishes a new schedule, write it as a pattern file and import it (see above). Check the area lists against it.
 2. Get an Africa's Talking shortcode and sender ID, and set a budget with `SMS_DAILY_LIMIT`.
 3. Host on HTTPS with `VAPID_SUBJECT` set, then test push on Android Chrome and an iPhone added to the home screen.
 4. USSD menu (`*xxx#`) as a second channel for basic phones.

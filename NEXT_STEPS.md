@@ -24,9 +24,12 @@ To restore: stop Magetsi, delete `magetsi.db`, `magetsi.db-wal` and `magetsi.db-
 
 ## To do, in order
 
-1. **Real schedule data.** The towns, areas and groups in `public/core.js` (`TOWN_AREAS`) are only examples.
-   Get ZESCO's published area and group lists, put them in `TOWN_AREAS`, then import the real schedule CSV on `/admin`.
-   Until then the alert times are not real.
+Magetsi is a portfolio project, so these are optional.
+
+1. **Schedule.** Done on 2026-11-05: the 164 areas and per-town groups come from ZESCO's March 2024 list. No schedule
+   is loaded, because ZESCO has none in force (June 2026: no nationwide load management expected). If one is published,
+   write it as a pattern file and run `npm run schedule` (see README). To show the app off with made-up data, start it with
+   `SEED_DEMO=1` on a separate database (set `DB_FILE`), so the real one stays clean.
 2. **Real SMS (free sandbox).** Make an Africa's Talking account and put `AT_USERNAME=sandbox` and `AT_API_KEY=...`
    in `.env`. Restart and test `JOIN` / `TIMES` / `STOP` with their phone simulator.
 3. **iPhone push.** On an iPhone (iOS 16.4+): Share → Add to Home Screen, open Magetsi from the icon, allow notifications, and tap Test.

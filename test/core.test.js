@@ -152,7 +152,7 @@ test('SMS commands', () => {
   const p = (t) => C.parseSmsCommand(t, C.AREAS);
   assert.equal(p('JOIN Chilenje').area.name, 'Chilenje');
   assert.equal(p('magetsi chilenje').area.name, 'Chilenje');
-  assert.equal(p('join mutendere east').area.name, 'Mutendere East');
+  assert.equal(p('join mtendere east').area.name, 'Mtendere East');
   assert.equal(p('Mtendere').area.name, 'Mtendere');
   assert.equal(p('JOIN KAB').cmd, 'ambiguous');
   assert.equal(p('JOIN Atlantis').cmd, 'unknown');
@@ -162,11 +162,62 @@ test('SMS commands', () => {
   assert.equal(p('JOIN 7').area.name, 'Chilenje');
 });
 
-test('areas: Lusaka ids unchanged, towns added, names unique', () => {
+test('areas: stable ids, unique names, every area in a group of its own town', () => {
   assert.deepEqual(C.AREAS.slice(0, 3).map((a) => [a.id, a.name, a.town]), [[1, 'Avondale', 'Lusaka'], [2, 'Bauleni', 'Lusaka'], [3, 'Chainda', 'Lusaka']]);
-  assert.equal(C.AREAS.find((a) => a.id === 30).name, 'PHI');
-  assert.ok(C.TOWNS.length >= 5);
+  assert.equal(C.AREAS.find((a) => a.id === 31).name, 'Nkana East');
+  assert.equal(new Set(C.AREAS.map((a) => a.id)).size, C.AREAS.length);
   assert.equal(new Set(C.AREAS.map((a) => a.name.toLowerCase())).size, C.AREAS.length);
+  for (const id of C.RETIRED_AREA_IDS) assert.ok(!C.AREAS.some((a) => a.id === id), `retired id ${id} reused`);
+  for (const a of C.AREAS) {
+    const g = C.GROUPS.find((x) => x.code === a.group_code);
+    assert.ok(g, `${a.name}: unknown group ${a.group_code}`);
+    assert.equal(g.town, a.town, `${a.name} is in another town's group`);
+  }
+  assert.deepEqual(C.TOWNS, ['Lusaka', 'Kitwe', 'Ndola', 'Kabwe', 'Livingstone']);
+});
+
+test('groups are per town and shown by letter', () => {
+  assert.equal(C.groupCode('Kitwe', 'B'), 'KIT-B');
+  assert.equal(C.groupName('LSK-C'), 'Group C');
+  assert.equal(C.groupName('ZZ'), 'Group ZZ');
+  assert.equal(new Set(C.GROUPS.map((g) => g.code)).size, C.GROUPS.length);
+});
+
+// The March 2024 ZESCO grid, cell for cell where checked against the PDF.
+const lusaka2024 = {
+  start: '2024-03-11', days: 7,
+  bands: ['18:00-02:00', '00:00-08:00', '05:00-13:00', '09:00-17:00', '15:00-23:00'],
+  cycle: [['A', 'B', 'C', 'D', 'E'], ['A', 'B', 'D', 'E', 'C'], ['A', 'B', 'E', 'C', 'D']],
+};
+const bandAt = (slots, start) => slots.filter((s) => s.start === start).map((s) => s.group_code).join('+');
+
+test('pattern: reproduces the published grid and keeps rotating', () => {
+  const day = (d) => C.patternSlots('Lusaka', lusaka2024, d, d).slots;
+  assert.equal(bandAt(day('2024-03-11'), '05:00'), 'LSK-C'); // week 1
+  assert.equal(bandAt(day('2024-03-19'), '05:00'), 'LSK-D'); // week 2
+  assert.equal(bandAt(day('2024-03-31'), '09:00'), 'LSK-C'); // week 3, Sunday
+  assert.equal(bandAt(day('2024-04-01'), '15:00'), 'LSK-E'); // cycle starts again
+  assert.equal(bandAt(day('2024-04-09'), '09:00'), 'LSK-E');
+  assert.equal(bandAt(day('2024-03-10'), '05:00'), 'LSK-E'); // the day before the grid: previous block
+  const one = day('2024-03-12');
+  assert.equal(one.length, 5);
+  assert.deepEqual(one.find((s) => s.group_code === 'LSK-A'), { group_code: 'LSK-A', date: '2024-03-12', start: '18:00', end: '02:00' });
+  // every group 8 h off a day
+  for (const g of ['A', 'B', 'C', 'D', 'E']) {
+    const ws = C.mergedWindows(one.filter((s) => s.group_code === `LSK-${g}`));
+    assert.equal(ws.reduce((t, w) => t + w.endMs - w.startMs, 0), 8 * C.HOUR);
+  }
+});
+
+test('pattern: shared cells, empty cells and mistakes', () => {
+  const p = { start: '2024-03-11', bands: ['05:00-13:00', '13:00-21:00'], cycle: [['A&B', ''], ['C', 'D']] };
+  const r = C.patternSlots('Kabwe', p, '2024-03-11', '2024-03-11');
+  assert.deepEqual(r.slots.map((s) => s.group_code), ['KBW-A', 'KBW-B']);
+  assert.match(C.patternSlots('Atlantis', p, '2024-03-11', '2024-03-11').errors[0], /Unknown town/);
+  assert.match(C.patternSlots('Kitwe', p, '2024-03-11', '2024-03-11').errors.join(), /unknown group "D"/);
+  assert.match(C.patternSlots('Kabwe', { ...p, bands: ['5-13', '13:00-21:00'] }, '2024-03-11', '2024-03-11').errors.join(), /band 1/);
+  assert.match(C.patternSlots('Kabwe', { ...p, cycle: [['A']] }, '2024-03-11', '2024-03-11').errors.join(), /one entry per band/);
+  assert.match(C.patternSlots('Kabwe', p, '2024-03-12', '2024-03-11').errors.join(), /from first/);
 });
 
 test('dashboard CSV quotes cells and leaves thin data blank', () => {

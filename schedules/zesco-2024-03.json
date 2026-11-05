@@ -1,0 +1,43 @@
+{
+  "source": "ZESCO load management schedule, 11 March to 10 April 2024. HISTORICAL: not in force today. Kept as a worked example of the pattern format.",
+  "towns": {
+    "Lusaka": {
+      "start": "2024-03-11",
+      "days": 7,
+      "bands": ["18:00-02:00", "00:00-08:00", "05:00-13:00", "09:00-17:00", "15:00-23:00"],
+      "cycle": [
+        ["A", "B", "C", "D", "E"],
+        ["A", "B", "D", "E", "C"],
+        ["A", "B", "E", "C", "D"]
+      ]
+    },
+    "Kitwe": {
+      "start": "2024-03-11",
+      "days": 7,
+      "bands": ["06:00-14:00", "14:00-22:00", "22:00-06:00"],
+      "cycle": [
+        ["A", "B", "C"],
+        ["B", "A", "C"]
+      ]
+    },
+    "Ndola": {
+      "start": "2024-03-11",
+      "days": 7,
+      "bands": ["05:00-13:00", "13:00-21:00", "00:00-08:00", "17:00-24:00"],
+      "cycle": [
+        ["A", "B", "C", "D"],
+        ["B", "A", "C", "D"]
+      ]
+    },
+    "Livingstone": {
+      "start": "2024-03-11",
+      "days": 7,
+      "bands": ["05:00-13:00", "09:00-17:00", "15:00-23:00"],
+      "cycle": [
+        ["B", "C", "A"],
+        ["A", "B", "C"],
+        ["C", "A", "B"]
+      ]
+    }
+  }
+}

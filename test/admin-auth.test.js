@@ -144,7 +144,7 @@ test('the script token can use the admin API but not manage accounts', async () 
 });
 
 test('audit log records who did what', async () => {
-  await api('/api/admin/slots', ownerCookie, { csv: 'B,2030-01-01,06:00,10:00' });
+  await api('/api/admin/slots', ownerCookie, { csv: 'LSK-B,2030-01-01,06:00,10:00' });
   const { entries } = await (await api('/api/admin/audit', ownerCookie)).json();
   const seen = (who, action) => entries.some((e) => e.username === who && e.action === action);
   assert.ok(seen('owner', 'setup'));

@@ -4,14 +4,12 @@ Households see their area's ZESCO load-shedding schedule, get alerts before powe
 
 **[Try the live demo](https://john-chola.github.io/Magetsi/)**: runs in your browser with a made-up schedule and reports (clearly labelled), no sign-up. Push alerts, SMS and the admin page need the full server (see [Run it](#run-it-nodejs-225-or-newer-nothing-to-install)).
 
-<!-- Screenshots: add docs/screenshots/now.png, schedule.png, reliability.png and alerts.png, then remove these comment markers.
 <p>
-  <img src="docs/screenshots/now.png" alt="Now tab: current power state and next change" width="200">
-  <img src="docs/screenshots/schedule.png" alt="Schedule tab: the week's outage times" width="200">
-  <img src="docs/screenshots/reliability.png" alt="Reliability tab: how well the schedule is kept" width="200">
-  <img src="docs/screenshots/alerts.png" alt="Alerts tab: push and SMS sign-up" width="200">
+  <img src="docs/screenshots/schedule.png" alt="Schedule tab: the next 7 days of outage times for an area" width="32%">
+  <img src="docs/screenshots/reliability.png" alt="Reliability tab: on-schedule percentage, unscheduled and late hours, scheduled vs actual per day" width="32%">
+  <img src="docs/screenshots/alerts.png" alt="Alerts tab: reminders before power goes off and comes back" width="32%">
 </p>
--->
+<sub>Screenshots from the demo, with made-up data.</sub>
 
 - **Push alerts** reach phones even when the app is closed (Web Push).
 - **SMS alerts** work on any phone, with no data needed (through Africa's Talking).

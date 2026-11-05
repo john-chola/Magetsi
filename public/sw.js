@@ -1,5 +1,5 @@
 // Magetsi service worker: offline app shell + last-known API answers, Web Push, and notification clicks.
-const CACHE = 'magetsi-v3';
+const CACHE = 'magetsi-v4';
 const SHELL = ['./', 'index.html', 'app.js', 'core.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', (e) => {

@@ -135,18 +135,28 @@ function removeOldDemoData() {
   if (slots || outages) console.log(`[magetsi] Removed the old demo schedule (${slots} slots) and ${outages} made-up reports.`);
 }
 
-// SEED_DEMO=1: a made-up rotation (8 days back, 14 ahead) and a week of synthetic reports, added once.
-function seedDemo() {
-  if (db.prepare("SELECT 1 FROM slots WHERE source = 'demo-rotation' LIMIT 1").get()) return;
-  const now = Date.now();
+// SEED_DEMO=1: a made-up rotation kept 14 days ahead, and synthetic household reports for every
+// finished outage. Runs at start and every hour, so a demo left running never goes stale.
+function topUpDemo(now = Date.now()) {
+  const today = core.lusakaDate(now);
+  const last = db.prepare("SELECT MAX(date) d FROM slots WHERE source = 'demo-rotation'").get().d;
+  const from = last ? core.addDays(last, 1) : core.addDays(today, -8);
+  const until = core.addDays(today, 14);
+  let days = 0;
+  for (let d = from; d <= until; d = core.addDays(d, 1)) days++;
+  const reportedUntil = Number(db.prepare("SELECT v FROM kv WHERE k = 'demo_reports_until'").get()?.v || 0);
   const insS = db.prepare('INSERT OR IGNORE INTO slots (group_code, date, start, "end", source, created_at) VALUES (?, ?, ?, ?, ?, ?)');
   const insO = db.prepare('INSERT INTO outages (area_id, device_id, off_at, on_at, manual, flagged, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
-  const slots = core.rotationSlots(core.addDays(core.lusakaDate(now), -8), 22);
   db.exec('BEGIN');
-  slots.forEach((s) => insS.run(s.group_code, s.date, s.start, s.end, s.source, now));
-  core.demoOutages(core.AREAS, slots, now, 7).forEach((o) => insO.run(o.area_id, o.device_id, o.offMs, o.onMs, 0, 0, now));
-  db.exec('COMMIT');
-  console.log('[magetsi] SEED_DEMO=1: added a DEMO schedule and synthetic reports. They are not real ZESCO data.');
+  try {
+    if (days) core.rotationSlots(from, days).forEach((s) => insS.run(s.group_code, s.date, s.start, s.end, s.source, now));
+    const recent = db.prepare("SELECT group_code, date, start, \"end\" AS end FROM slots WHERE source = 'demo-rotation' AND date >= ?").all(core.addDays(today, -8));
+    const reports = core.demoOutages(core.AREAS, recent, now, 7).filter((o) => o.onMs > reportedUntil && o.onMs <= now); // each report once, when it has ended
+    reports.forEach((o) => insO.run(o.area_id, o.device_id, o.offMs, o.onMs, 0, 0, now));
+    db.prepare("INSERT INTO kv (k, v) VALUES ('demo_reports_until', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(String(now));
+    db.exec('COMMIT');
+    if (!last) console.log('[magetsi] SEED_DEMO=1: added a DEMO schedule and synthetic reports. They are not real ZESCO data.');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
 {
@@ -158,7 +168,13 @@ function seedDemo() {
   const r = syncAreas();
   if (fresh) console.log(`[magetsi] Created ${core.AREAS.length} areas in ${core.TOWNS.length} towns.`);
   else if (r.added || r.changed || r.retired) console.log(`[magetsi] Areas updated from public/core.js: ${r.added} added, ${r.changed} changed, ${r.retired} retired.`);
-  if (SEED_DEMO) seedDemo();
+  if (SEED_DEMO) {
+    if (require.main === module && path.resolve(DB_FILE) === path.join(__dirname, 'magetsi.db')) {
+      console.log('[magetsi] WARNING: SEED_DEMO=1 is writing made-up data into the main magetsi.db. Use start-demo.cmd, which keeps the demo in magetsi-demo.db.');
+    }
+    topUpDemo();
+    setInterval(() => { topUpDemo(); dashCache.clear(); }, core.HOUR).unref();
+  }
 }
 
 // Close outages left open for more than 24 h and flag them (left out of stats)
@@ -246,7 +262,8 @@ function loadVapid() {
 }
 const vapid = loadVapid();
 
-const sms = createSms();
+// A demo copy never sends real SMS about its made-up schedule.
+const sms = createSms(SEED_DEMO ? { ...process.env, AT_API_KEY: '' } : process.env);
 
 // ---------- rate limiting (in memory) ----------
 const hits = new Map();
@@ -543,7 +560,7 @@ async function runAlerts(now = Date.now()) {
       for (const a of core.dueAlerts({ ...c, settings, now })) {
         if (!claim('push', String(sub.id), a.tag)) continue;
         jobs.push(async () => {
-          const r = await pushTo(sub, { title: a.title, body: a.body, tag: a.tag, url: './' });
+          const r = await pushTo(sub, { title: SEED_DEMO ? `DEMO: ${a.title}` : a.title, body: a.body, tag: a.tag, url: './' });
           if (!r.ok && !r.gone) q.unclaim.run('push', String(sub.id), a.tag);
         });
       }
@@ -582,7 +599,7 @@ function dashboard(days, now) {
       lateRestoreMinPerDay: s.lateRestoreMinPerDay, actualHoursPerDay: s.actualHoursPerDay, scheduledHoursPerDay: s.scheduledHoursPerDay,
     };
   });
-  const data = { days, from: core.lusakaDate(fromMs), to: core.lusakaDate(now), generatedAt: now, minHouseholds: core.RULES.statsMinHouseholds, towns: core.TOWNS, rows };
+  const data = { days, demo: SEED_DEMO, from: core.lusakaDate(fromMs), to: core.lusakaDate(now), generatedAt: now, minHouseholds: core.RULES.statsMinHouseholds, towns: core.TOWNS, rows };
   dashCache.set(days, { at: now, data });
   return data;
 }
@@ -599,7 +616,7 @@ async function api(req, res, url) {
   const m = req.method;
   const now = Date.now();
 
-  if (m === 'GET' && p === '/api/health') return send(res, 200, { ok: true, mode: 'server', now });
+  if (m === 'GET' && p === '/api/health') return send(res, 200, { ok: true, mode: 'server', demo: SEED_DEMO, now });
 
   if (m === 'GET' && p === '/api/areas') return send(res, 200, { areas: q.areas.all(), groups: core.GROUPS, towns: core.TOWNS });
 
@@ -873,4 +890,4 @@ if (require.main === module) {
     process.once('SIGINT', () => stop('SIGINT'));
   });
 }
-module.exports = { server, db, admins, runAlerts, handleInbound, setupToken: () => SETUP_TOKEN };
+module.exports = { server, db, admins, runAlerts, handleInbound, topUpDemo, setupToken: () => SETUP_TOKEN };

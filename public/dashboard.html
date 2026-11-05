@@ -43,6 +43,7 @@
 </head>
 <body>
 <div class="wrap">
+  <p id="demoBanner" role="note" hidden style="background:#ffb627;color:#241a00;border-radius:10px;padding:8px 12px;font-size:14px"><b>Demo data.</b> The schedule and household reports behind these figures are made up to show how Magetsi works. They are not from ZESCO.</p>
   <h1>Is the load-shedding schedule kept?</h1>
   <p>For each area, households tap <b>Power went off</b> and <b>Power is back</b> in Magetsi. These figures compare what they logged with the published schedule. Each figure is the median reporting household. <a href="./">Open the app</a></p>
 
@@ -84,6 +85,7 @@
       document.querySelector('#tbl tbody').innerHTML = `<tr><td>Could not load the data (${esc(e.message)}). The dashboard needs the Magetsi server.</td></tr>`;
       return;
     }
+    document.getElementById('demoBanner').hidden = !st.data.demo;
     const sel = document.getElementById('town');
     if (sel.options.length === 1) for (const t of st.data.towns) sel.add(new Option(t, t));
     draw();

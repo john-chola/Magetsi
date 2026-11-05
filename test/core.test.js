@@ -98,6 +98,27 @@ test('demo rotation gives every group 8 hours a day', () => {
   }
 });
 
+test('demo data is the same however it is generated', () => {
+  // the rotation follows the calendar, not the start date
+  const two = C.rotationSlots('2026-11-01', 2).filter((s) => s.date === '2026-11-02');
+  assert.deepEqual(two, C.rotationSlots('2026-11-02', 1));
+  // a given outage gets the same reports from a different slot range or a later "now"
+  const now = at('2026-11-08', '12:00');
+  const a = C.demoOutages(C.AREAS.slice(0, 3), C.rotationSlots('2026-10-31', 9), now);
+  const b = C.demoOutages(C.AREAS.slice(0, 3), C.rotationSlots('2026-11-04', 6), now + 2 * C.HOUR);
+  const key = (o) => `${o.device_id}|${o.offMs}|${o.onMs}`;
+  const inB = new Set(b.map(key));
+  const overlapping = a.filter((o) => o.offMs >= at('2026-11-04', '06:00'));
+  assert.ok(overlapping.length > 10);
+  for (const o of overlapping) assert.ok(inB.has(key(o)), key(o));
+});
+
+test('dashboard CSV says when it is demo data', () => {
+  const meta = { from: '2026-11-01', to: '2026-11-08' };
+  assert.match(C.dashboardCsv([], { ...meta, demo: true }), /^# DEMO DATA/);
+  assert.doesNotMatch(C.dashboardCsv([], meta), /DEMO/);
+});
+
 // ---------- alerts, SMS, towns ----------
 test('push alerts: reminder before off, restore, quiet hours, unscheduled', () => {
   const area = { id: 7, name: 'Chilenje' };

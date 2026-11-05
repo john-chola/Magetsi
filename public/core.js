@@ -309,6 +309,7 @@
   function dashboardCsv(rows, meta) {
     const cell = (v) => { const s = v == null ? '' : String(v); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const lines = [
+      ...(meta.demo ? ['# DEMO DATA: the schedule and household reports are made up, not from ZESCO.'] : []),
       `# Magetsi schedule adherence ${meta.from} to ${meta.to} (Lusaka time). Figures are the median reporting household; blank when fewer than ${RULES.statsMinHouseholds} households reported.`,
       'area_id,area,town,group,households,enough_reports,on_schedule_pct,extra_hours_per_day,late_restore_min_per_day,actual_hours_per_day,scheduled_hours_per_day',
     ];
@@ -468,15 +469,17 @@
 
   // ---------- demo data ----------
   // Six 4-hour bands; in each town every group is off for two bands a day (8 h), rotating daily.
+  // The rotation is fixed to the calendar, so slots made on different days line up.
   const BANDS = [['02:00', '06:00'], ['06:00', '10:00'], ['10:00', '14:00'], ['14:00', '18:00'], ['18:00', '22:00'], ['22:00', '02:00']];
   function rotationSlots(startDate, days) {
     const out = [];
     for (let d = 0; d < days; d++) {
       const date = addDays(startDate, d);
+      const dayNo = Math.round(toMs(date, '12:00') / DAY);
       for (const town of TOWNS) {
         TOWN_GROUPS[town].letters.forEach((l, gi) => {
           for (const k of [0, 3]) {
-            const [start, end] = BANDS[(gi + d + k) % 6];
+            const [start, end] = BANDS[(gi + dayNo + k) % 6];
             out.push({ group_code: groupCode(town, l), date, start, end, source: 'demo-rotation' });
           }
         });
@@ -485,42 +488,45 @@
     return out;
   }
 
-  // Deterministic pseudo-random so the demo looks the same each run
+  // Deterministic pseudo-random, seeded per area / household / window, so the same outage always
+  // gets the same report however often the demo data is regenerated.
   function prng(seed) {
     let s = seed >>> 0;
     return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
   }
+  const seedOf = (...xs) => xs.reduce((s, x) => Math.imul(s ^ (x | 0), 2654435761) >>> 0, 42);
 
   /** Synthetic household reports for the past `days`: mostly on schedule, some late, a few unscheduled. */
   function demoOutages(areas, slots, now, days = 7) {
-    const rnd = prng(42);
     const out = [];
     const from = now - days * DAY;
     for (const area of areas) {
-      const hh = 3 + Math.floor(rnd() * 4); // 3..6 households per area
+      const ar = prng(seedOf(area.id));
+      const hh = 3 + Math.floor(ar() * 4); // 3..6 households per area
+      const lateness = ar() < 0.35 ? 90 : 20; // some areas get worse service
       const ws = mergedWindows(slots.filter((s) => s.group_code === area.group_code));
-      // area "character": some areas get worse service
-      const lateness = rnd() < 0.35 ? 90 : 20;
       for (let h = 0; h < hh; h++) {
         const device_id = `seed-${area.id}-${h}`;
         for (const w of ws) {
           if (w.startMs < from || w.endMs > now) continue;
-          if (rnd() < 0.05) continue; // household didn't report this one
-          const offMs = w.startMs + Math.round((rnd() * 10 - 2) * MIN);
-          const onMs = w.endMs + Math.round(rnd() * lateness * MIN);
+          const r = prng(seedOf(area.id, h, w.startMs / MIN));
+          if (r() < 0.05) continue; // household didn't report this one
+          const offMs = w.startMs + Math.round((r() * 10 - 2) * MIN);
+          const onMs = w.endMs + Math.round(r() * lateness * MIN);
           out.push({ area_id: area.id, device_id, offMs, onMs, manual: 0, flagged: 0 });
         }
-        // a couple of unscheduled outages per area per week, shared by most households
-        // (generated once per area below)
       }
-      const extra = 1 + Math.floor(rnd() * 3);
-      for (let e = 0; e < extra; e++) {
-        const startMs = from + Math.floor(rnd() * (days - 1)) * DAY + Math.floor(rnd() * 20) * HOUR;
-        if (ws.some((w) => overlap(startMs, startMs + 2 * HOUR, w.startMs, w.endMs) > 0)) continue;
-        const dur = (1 + rnd() * 2) * HOUR;
+      // about two unscheduled outages per area a week, reported by most households
+      for (let d = lusakaDate(from); d <= lusakaDate(now); d = addDays(d, 1)) {
+        const r = prng(seedOf(area.id, 999, toMs(d, '00:00') / MIN));
+        if (r() > 0.3) continue;
+        const startMs = toMs(d, '00:00') + Math.floor(r() * 20) * HOUR;
+        const dur = (1 + r() * 2) * HOUR;
+        if (startMs < from || startMs + dur > now) continue;
+        if (ws.some((w) => overlap(startMs, startMs + dur, w.startMs, w.endMs) > 0)) continue;
         for (let h = 0; h < hh; h++) {
-          if (rnd() < 0.3) continue;
-          out.push({ area_id: area.id, device_id: `seed-${area.id}-${h}`, offMs: startMs + Math.round(rnd() * 5 * MIN), onMs: startMs + dur, manual: 0, flagged: 0 });
+          if (r() < 0.3) continue;
+          out.push({ area_id: area.id, device_id: `seed-${area.id}-${h}`, offMs: startMs + Math.round(r() * 5 * MIN), onMs: startMs + dur, manual: 0, flagged: 0 });
         }
       }
     }

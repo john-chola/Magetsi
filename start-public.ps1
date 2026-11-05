@@ -2,6 +2,9 @@
 # Run by double-clicking start-public.cmd, or:  powershell -ExecutionPolicy Bypass -File start-public.ps1
 # Optional secrets (AT_USERNAME, AT_API_KEY, ...) go in a file named .env next to this script,
 # one KEY=VALUE per line. .env is git-ignored.
+# With -Demo (or start-demo.cmd) it runs a demo copy instead: made-up schedule and reports, kept in
+# magetsi-demo.db so they never mix with the real magetsi.db. Only one copy can use the public link at a time.
+param([switch]$Demo)
 
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
@@ -22,15 +25,26 @@ if (Test-Path $envFile) {
   Write-Host 'Loaded settings from .env'
 }
 
+$title = 'Magetsi'
+if ($Demo) {
+  $env:SEED_DEMO = '1'
+  $env:DB_FILE = Join-Path $here 'magetsi-demo.db'
+  $title = 'Magetsi DEMO'
+  Write-Host 'DEMO mode: made-up data in magetsi-demo.db. Your real magetsi.db is not touched.'
+} else {
+  Remove-Item Env:SEED_DEMO -ErrorAction SilentlyContinue
+}
+
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Node.js is not installed or not on PATH.' }
 if (-not (Get-Command ngrok -ErrorAction SilentlyContinue)) { throw 'ngrok is not installed or not on PATH.' }
 
 $port = if ($env:PORT) { $env:PORT } else { '3000' }
 if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
   Write-Host "Something is already using port $port (Magetsi may already be running). Not starting a second copy."
+  Write-Host 'To switch between the real app and the demo, press Ctrl+C in the open Magetsi window first.'
 } else {
   # Child windows inherit the environment variables set above.
-  Start-Process powershell -WorkingDirectory $here -ArgumentList '-NoExit', '-Command', "`$host.UI.RawUI.WindowTitle = 'Magetsi'; npm start"
+  Start-Process powershell -WorkingDirectory $here -ArgumentList '-NoExit', '-Command', "`$host.UI.RawUI.WindowTitle = '$title'; npm start"
   Start-Sleep -Seconds 2
 }
 

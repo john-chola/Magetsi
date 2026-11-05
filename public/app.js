@@ -99,9 +99,11 @@
       clearTimeout(t);
       const j = await r.json();
       if (!j.ok) throw new Error('no');
+      if (j.demo) showDemoLabels(); // server started with SEED_DEMO=1
     } catch { useDemo(); }
   }
-  function useDemo() { api = DemoBackend; DemoBackend.init(); $('#demoPill').hidden = false; }
+  function showDemoLabels() { $('#demoPill').hidden = false; $('#demoBanner').hidden = false; }
+  function useDemo() { api = DemoBackend; DemoBackend.init(); showDemoLabels(); }
 
   // ---------- state ----------
   const MAX_SAVED = 5;

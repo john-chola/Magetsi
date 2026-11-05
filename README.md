@@ -13,14 +13,14 @@ Households see their area's ZESCO load-shedding schedule, get alerts before powe
 ```bash
 npm start            # or: node server.js
 # app: http://localhost:3000   admin: /admin   dashboard: /dashboard
-npm test             # 60 unit + API tests
+npm test             # 64 unit + API tests
 npm run schedule     # turn ZESCO's weekly grid into import CSV (see below)
 npm run backup       # snapshot magetsi.db into backups/ (safe while running; keeps the newest 30)
 npm run build:demo   # dist/magetsi-demo.html, a single file that runs with no server (no push/SMS)
 ```
 
 - The first run creates `magetsi.db` (SQLite) with 164 areas in 5 towns and **no schedule** (see [Importing a schedule](#importing-a-schedule)).
-- To try the app with made-up data, start with `SEED_DEMO=1`: it adds a demo rotation and a week of synthetic household reports. They are not real ZESCO data.
+- To show the app working, start a **demo copy** with `SEED_DEMO=1` and its own database (on Windows: double-click `start-demo.cmd`, which uses `magetsi-demo.db`). It keeps a made-up rotation 14 days ahead and adds synthetic household reports every hour. Every page shows a "Demo data" banner, push alerts start with "DEMO:", the CSV export is labelled, and SMS is never sent for real.
 - An existing database is upgraded on start: new tables are created, and areas and groups are brought in line with `public/core.js`. Existing data is kept.
 - Delete `magetsi.db` to start fresh.
 - On Windows with ngrok, double-click `start-public.cmd` to open Magetsi and the public link in two windows. Secrets such as `AT_API_KEY` can go in a git-ignored `.env` file (one `KEY=VALUE` per line), which the script loads.
@@ -153,7 +153,7 @@ Browsers allow notifications and push only on `localhost` or HTTPS. To try it on
 | `admin-cli.js` | `npm run admin`: list, create, reset, disable admins |
 | `schedule-cli.js`, `schedules/` | `npm run schedule`: ZESCO pattern file to import CSV, with a March 2024 example |
 | `backup.js` | `npm run backup`: consistent copy of the database into `backups/` |
-| `start-public.ps1`, `start-public.cmd` | Windows: start Magetsi and the ngrok link together, loading `.env` |
+| `start-public.ps1`, `start-public.cmd`, `start-demo.cmd` | Windows: start Magetsi (or the demo copy) and the ngrok link together, loading `.env` |
 | `test/` | `node --test` suites |
 
 ## API

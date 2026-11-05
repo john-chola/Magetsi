@@ -82,7 +82,7 @@ test('push: the alert loop sends an encrypted reminder once', async () => {
   await runAlerts(now);
   const off = received.map((r) => ({ r, msg: openPush(r.body) })).find((x) => x.msg.tag === `off-7-${w.startMs}`);
   assert.ok(off, 'reminder for Chilenje was pushed');
-  assert.equal(off.msg.title, `Power off at ${C.lusakaTime(w.startMs)} in Chilenje`);
+  assert.equal(off.msg.title, `DEMO: Power off at ${C.lusakaTime(w.startMs)} in Chilenje`); // demo server labels its alerts
   assert.equal(off.r.headers['content-encoding'], 'aes128gcm');
   assert.match(off.r.headers.authorization, /^vapid t=.+, k=.+$/);
   assert.ok(Number(off.r.headers.ttl) > 0);
@@ -183,7 +183,8 @@ test('public dashboard and CSV export', async () => {
   assert.match(csv.headers.get('content-type'), /text\/csv/);
   assert.match(csv.headers.get('content-disposition'), /magetsi-adherence-.*-30d\.csv/);
   const lines = csv.text.trim().split('\r\n');
-  assert.equal(lines.length, C.AREAS.length + 2);
+  assert.match(lines[0], /^# DEMO DATA/);
+  assert.equal(lines.length, C.AREAS.length + 3); // demo note, title, header, one row per area
 });
 
 test('admin overview needs the token', async () => {

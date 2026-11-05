@@ -9,6 +9,11 @@ the app, `/dashboard`, `/admin` (sign-in), SMS commands in log mode, and push al
 Double-click `start-public.cmd` in the `magetsi` folder. It opens two windows, "Magetsi" and "ngrok".
 To stop, press Ctrl+C in each window.
 
+**Demo for recruiters:** double-click `start-demo.cmd` instead. Same public link, but with a made-up schedule and
+reports (kept in `magetsi-demo.db`) and a "Demo data" banner on every page. Only one of the two can run at a time:
+close the Magetsi window (Ctrl+C) before switching. The demo has its own admin account; the setup token is printed
+in its window the first time.
+
 Settings that should stay off GitHub (for example `AT_USERNAME` and `AT_API_KEY`) go in a file named `.env`
 in the same folder, one `KEY=VALUE` per line. The script reads it every time it starts.
 
@@ -28,8 +33,7 @@ Magetsi is a portfolio project, so these are optional.
 
 1. **Schedule.** Done on 2026-11-05: the 164 areas and per-town groups come from ZESCO's March 2024 list. No schedule
    is loaded, because ZESCO has none in force (June 2026: no nationwide load management expected). If one is published,
-   write it as a pattern file and run `npm run schedule` (see README). To show the app off with made-up data, start it with
-   `SEED_DEMO=1` on a separate database (set `DB_FILE`), so the real one stays clean.
+   write it as a pattern file and run `npm run schedule` (see README).
 2. **Real SMS (free sandbox).** Make an Africa's Talking account and put `AT_USERNAME=sandbox` and `AT_API_KEY=...`
    in `.env`. Restart and test `JOIN` / `TIMES` / `STOP` with their phone simulator.
 3. **iPhone push.** On an iPhone (iOS 16.4+): Share → Add to Home Screen, open Magetsi from the icon, allow notifications, and tap Test.

@@ -9,9 +9,10 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'magetsi-'));
 process.env.DB_FILE = path.join(tmp, 'test.db');
 process.env.ADMIN_TOKEN = 'test-token';
 process.env.SEED_DEMO = '1'; // schedule and stats tests need the demo data
-const { server, db } = require('../server.js');
+const { server, db, topUpDemo } = require('../server.js');
 
 let base;
+server.keepAliveTimeout = 60_000; // the demo top-up test blocks for a few seconds
 test.before(() => new Promise((r) => server.listen(0, () => { base = `http://127.0.0.1:${server.address().port}`; r(); })));
 test.after(() => { server.close(); db.close(); fs.rmSync(tmp, { recursive: true, force: true }); });
 
@@ -20,6 +21,25 @@ const post = (p, body, headers = {}) => fetch(base + p, { method: 'POST', header
   .then(async (r) => ({ status: r.status, body: await r.json() }));
 
 const device = 'test-device-0001';
+
+test('a demo server says so, and its CSV export is labelled', async () => {
+  assert.equal((await get('/api/health')).body.demo, true);
+  assert.equal((await get('/api/dashboard?days=7')).body.demo, true);
+  const csv = await fetch(base + '/api/dashboard.csv?days=7').then((r) => r.text());
+  assert.match(csv.split('\r\n')[0], /^# DEMO DATA/);
+});
+
+test('demo data tops up without duplicates', () => {
+  const count = (sql) => db.prepare(sql).get().n;
+  const slots0 = count("SELECT COUNT(*) n FROM slots WHERE source = 'demo-rotation'");
+  const reports0 = count("SELECT COUNT(*) n FROM outages WHERE device_id LIKE 'seed-%'");
+  topUpDemo(); // nothing new has happened
+  assert.equal(count("SELECT COUNT(*) n FROM outages WHERE device_id LIKE 'seed-%'"), reports0);
+  for (const hours of [3, 27, 51]) topUpDemo(Date.now() + hours * 3600_000); // the demo keeps running for two days
+  assert.ok(count("SELECT COUNT(*) n FROM slots WHERE source = 'demo-rotation'") > slots0, 'schedule extended');
+  assert.ok(count("SELECT COUNT(*) n FROM outages WHERE device_id LIKE 'seed-%'") > reports0, 'new reports added');
+  assert.equal(count("SELECT COUNT(*) n FROM (SELECT device_id, off_at FROM outages WHERE device_id LIKE 'seed-%' GROUP BY 1, 2 HAVING COUNT(*) > 1)"), 0);
+});
 
 test('areas are seeded', async () => {
   const r = await get('/api/areas');
